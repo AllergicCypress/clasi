@@ -1,0 +1,45 @@
+version: 3
+
+# hints.yaml — casos especiales que el motor de descubrimiento no puede inferir.
+# NO contiene temas académicos ni rutas hardcodeadas.
+# El descubrimiento dinámico de carpetas reemplaza todo eso.
+#
+# NOTA: Este archivo reemplaza a rules.yaml (v2).
+# El backup del archivo anterior está en rules.yaml.bak
+
+hints:
+
+  # Duplicados por nombre de descarga
+  - nombre: duplicados_descarga
+    filter_mode: any
+    filtros:
+      - nombre_contiene: [" (1)", " (2)", " (3)", ".crdownload"]
+    accion_especial: marcar_duplicado
+    conflicto: rename_new
+
+  # Instaladores — clasificación por extensión, sin semántica temática
+  - nombre: instaladores
+    filter_mode: any
+    filtros:
+      - extension: [".exe", ".msi", ".run", ".deb", ".rpm", ".AppImage"]
+    accion_especial: carpeta_especial
+    nombre_carpeta: Software_Instaladores
+    conflicto: skip
+
+  # Imágenes sin contexto temático
+  - nombre: imagenes_sueltas
+    filter_mode: any
+    filtros:
+      - extension: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".tiff"]
+    accion_especial: carpeta_especial
+    nombre_carpeta: Imágenes_Generales
+    conflicto: rename_new
+
+  # Archivos comprimidos
+  - nombre: comprimidos
+    filter_mode: any
+    filtros:
+      - extension: [".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar"]
+    accion_especial: carpeta_especial
+    nombre_carpeta: Comprimidos
+    conflicto: skip
