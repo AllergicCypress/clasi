@@ -207,16 +207,42 @@ The system currently classifies files but doesn't learn from errors the user det
 
 ---
 
+# REV-004 — The global index collapses same-named structural folders across different subjects
+
+## Severity
+
+High
+
+## Status
+
+Open — found via `clasi evaluate`, design not started
+
+### Problem
+
+`construir_indice()` keys its index by normalized folder name alone. When the *same* structural name (`UNIT 1`, `EXAM`, `TAREA 3.1`...) appears under more than one unrelated subject — e.g. `Numerical Methods/UNIT 1` and `Differential Equations/UNIT1/1.1` — only **one** canonical entry survives (chosen by the existing location-priority rule), and the other becomes invisible as a destination. A loose file that actually belongs to the *losing* subject's `UNIT 1` gets scored against the *winning* subject's `UNIT 1` instead, since the index has no notion of "which subject this structural folder belongs to."
+
+This was already noted as a known limitation during the REV-001 work (2026-06-20 session) and deliberately left out of scope. `clasi evaluate` (added 2026-06-21) turned it from a theoretical concern into the dominant measured error source: most "incorrect" holdout cases after fixing the tokenization bug (see `PROJECT.md` §17-19) are exactly this — cross-subject collisions, not name-matching defects.
+
+### Why it's hard
+
+A genuinely loose file (sitting outside any folder) carries no explicit "which subject tree" signal beyond its own name/content. If that content is generic (a short homework file, a cover page), there may be no reliable way to disambiguate `UNIT 1` in subject A from `UNIT 1` in subject B without more context than the file itself provides — this isn't purely an implementation bug, part of it is an inherent information limit.
+
+### Possible lines of investigation
+
+- Scope structural-folder index keys by their nearest non-structural/thematic ancestor (e.g. index `"numericalmethods/unidad1"` and `"ecuacionesdiferenciales/unidad1"` separately) instead of by bare normalized name.
+- When scoring a loose file, weight matches by how strongly the file's content also matches the *ancestor* subject folder, not just the structural leaf.
+- Accept this as a known limitation for now and surface it explicitly in `sim`/`evaluate` output (e.g. flag low-confidence matches into generically-named structural folders differently from matches into uniquely-named ones).
+
+---
+
 # Priority summary
 
 | ID | Severity | Priority |
 |----|----------|----------|
 | REV-001 | Critical | 1 |
-| REV-002 | High | 2 |
-| REV-003 | Medium | 3 |
+| REV-004 | High | 2 |
+| REV-002 | High | 3 |
+| REV-003 | Medium | 4 |
 
-REV-001 should be considered the main architectural risk identified so far.
+REV-001 should be considered the main architectural risk identified so far, with REV-004 a close second now that it has measured evidence behind it.
 
----
-
-*Spanish checkpoint: `Revisiones_1.2.md`.*

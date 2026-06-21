@@ -67,6 +67,16 @@ Now:    user organizes folders → tool learns from them
 
 16. **Content homogeneity must NOT be required on narrow (deep) subfolders.** The first version of the heuristic applied the homogeneity test to every folder, regardless of depth. Result: `ACTIVIDAD 5.3`, `PAPC1.3`, `2.2`, `EU4` — correct destinations already validated in real tests — fell below the threshold and got excluded from the index. The cause: in those folders, the file matches by **exact name** (`ACTIVIDAD 5.3.xlsx` → folder `ACTIVIDAD 5.3`), not by content topic, so their files can be heterogeneous among themselves without that invalidating the folder as a destination. Fix: the homogeneity test only applies up to `MAX_PROFUNDIDAD_HOMOGENEIDAD = 2` levels from the scanned root; deeper than that, the folder is assumed thematic by design (same as folders with a structural name, which are exempt regardless of depth). Verified with `clasi sim ~/Documents`: the exact same 7 files with a destination / 12 without, and the same scores (0.70–0.79), as the real test documented in previous sessions — zero regression.
 
+### 2026-06-21 session — `clasi evaluate` (holdout evaluation) and two real findings
+
+17. **The "ground truth" for measuring accuracy already exists: it's wherever the user already filed each thing.** No human needs to judge "is this well organized" — 1-3 files are virtually held out from each thematic folder (max 20% of its contents), that folder's signal is rebuilt without them, and we check whether `clasi` routes them back to the same folder. This gives an objective, cross-user-comparable accuracy percentage without anyone sharing real files (reports only use short hashes). Implemented as `clasi evaluate <directory>` in `src/evaluator.py`.
+
+18. **`MIN_LONGITUD_TOKEN` was erasing the numbers that distinguish structural folders.** The first `clasi evaluate` run against `~/Documents`: only 5% accuracy. Cause: `tokenizar()` discarded tokens under 3 characters as if they were stopwords like "the"/"a", but that also erased the numbers in `UNIT 1` vs `UNIT 6`, or split `2.6` into `"2"` + `"6"` (which then collided with `6.1`). Both folders ended up with the identical name token — indistinguishable to the scorer. Fixed in two steps: (a) purely numeric tokens are kept regardless of length, (b) decimals (`"2.6"`) are captured whole instead of being split at the dot. Result: 5%→19% accuracy, and "incorrect" (wrong destination) dropped from 56%→19% — most remaining failures now land on "no destination" (the safe side of the error), not on a wrong move.
+
+19. **That same bug had inflated a result we'd counted as "validated."** The documented case `tarea_7_2.* → .../TAREA 3.1 (score 0.71)` wasn't a genuine match: `"TAREA 3.1"` and `"tarea_7_2"` both collapsed to the same `"tarea"` token (losing "3.1" and "7.2"), producing a false 100% name match even though the numbers don't correspond. After the fix, the real score (0.36–0.39) falls below the threshold and the file ends up with no destination — more honest than a move justified by a false signal. Lesson: a "high" score isn't evidence the algorithm understood anything; you should be able to explain *why* it matched before counting it as validation.
+
+20. **Bigger finding, still unresolved: the global index collapses structural folders from different subjects into one.** `clasi evaluate` showed most remaining "incorrect" cases are cross-course collisions: `Numerical Methods/UNIT 1` gets confused with `Differential Equations/UNIT1/1.1` (score 0.91) because the index keeps only **one** canonical entry per normalized name, with no awareness of which subject each one belongs to. This limitation had already been flagged as "out of scope" in an earlier session; there's now quantitative evidence it's the dominant remaining error source. Logged as REV-004 (see `REVIEWS_1.2.md`) — design pending, since it's a bigger architectural change than a tokenization fix.
+
 ---
 
 ## Prior art — similar tools
@@ -313,18 +323,16 @@ clasi move-folder "Calculus":
 ```
 clasificador-archivos/
 ├── README.md
-├── PROJECT.md           ← this document (English)
-├── REVIEWS_1.1.md       ← architecture review log (English)
+├── PROJECT.md           ← this document
+├── REVIEWS_1.1.md       ← architecture review log
 ├── REVIEWS_1.2.md
-├── PROYECTO.md          ← original Spanish checkpoint, kept as-is
-├── Revisiones_1.1.md    ← original Spanish checkpoint, kept as-is
-├── Revisiones_1.2.md
 ├── src/
 │   ├── discovery.py     ← dynamic folder index; TF-IDF scoring with penalties
 │   ├── scanner.py       ← walks the directory, applies exclusions, skips symlinks
 │   ├── extractor.py     ← extracts text/metadata depending on file type
 │   ├── classifier.py    ← hints first, then TF-IDF discovery
 │   ├── executor.py      ← moves files, JSON Lines log, undo
+│   ├── evaluator.py     ← holdout accuracy evaluation
 │   └── cli.py           ← clasi sim | run | undo  [merge | move-folder in Phase 2]
 ├── config/
 │   ├── hints.yaml              ← special cases with no thematic semantics (v3)
@@ -510,6 +518,9 @@ Goal: recursive index, detection of duplicate or misplaced folders, and extended
 - [x] `clasi sim`: duplicate folder warnings and relocation suggestions
 - [x] `max_depth` as a CLI argument (`--max-depth`, default 4)
 - [x] Folder categorization (thematic/container) before indexing — REV-001: blocklist (`carpetas_genericas.yaml`) + content homogeneity bounded by depth (`MAX_PROFUNDIDAD_HOMOGENEIDAD = 2`)
+- [x] `clasi evaluate`: holdout accuracy evaluation against the user's own existing organization (`src/evaluator.py`)
+- [x] Numeric and decimal tokens preserved in `tokenizar()` (previously lost to `MIN_LONGITUD_TOKEN`)
+- [ ] REV-004: the global index collapses same-named structural folders across different subjects (unresolved, see REVIEWS_1.2.md)
 - [ ] `clasi merge`: unify duplicate folders into the canonical one (with log and undo)
 - [ ] `clasi move-folder`: relocate a folder to a more appropriate place
 - [ ] Support for: audio (mutagen), video (ffprobe), source code, ZIP, EPUB
@@ -564,10 +575,12 @@ Goal: anyone can install `clasi` and use it without manual configuration.
 - [x] **TF-IDF confidence threshold** — 0.40. Calibrated to avoid false positives from "mentioning" vs. "belonging to" a topic. Configurable via CLI with `--umbral`.
 - [x] **Content-only-match penalty** — if the file's stem contributes no token matching the folder, the score is multiplied by 0.35. Prevents documents that MENTION a topic from being classified as belonging to it.
 - [x] **Folder categorization (REV-001)** — `UMBRAL_HOMOGENEIDAD = 0.15` (average Jaccard between sampled files, minimum 3 samples) and `MAX_PROFUNDIDAD_HOMOGENEIDAD = 2`. Both provisional: calibrated only against the real test on `~/Documents`; recalibration pending against more user structures.
+- [x] **Holdout evaluation (`clasi evaluate`)** — 1-3 files per thematic folder, never exceeding 20% of its contents; folders need ≥5 files to be evaluated at all. Reports are anonymized with a short (irreversible) hash + extension.
+- [x] **`tokenizar()` keeps numbers** — purely numeric tokens skip the length filter; decimals (`"2.6"`) are captured whole instead of being split at the dot. Fixed after `clasi evaluate` showed it collapsed folders like `UNIT 1`/`UNIT 6` into the same token.
 - [ ] **Init subcommand name** — `clasi init`, `clasi setup`, something else?
 
 ---
 
 ## A note on language
 
-The codebase, CLI output, and config files are in Spanish (the original author's language) — that's intentional and won't change, since it's already tested and working end to end. This document and the review log (`REVIEWS_*.md`) are English translations of the original `PROYECTO.md` / `Revisiones_*.md`, kept in the repo as Spanish checkpoints of the project's history. The English versions exist to reach a wider audience for testing help. See `README.md` for a quick bilingual orientation.
+The codebase, CLI output, and config files are in Spanish (the original author's language) — that's intentional and won't change, since it's already tested and working end to end. This document and the review log (`REVIEWS_*.md`) are in English to reach a wider audience for testing help. See `README.md` for a quick bilingual orientation.

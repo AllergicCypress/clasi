@@ -17,6 +17,7 @@ from discovery import (
     cargar_carpetas_genericas,
     construir_indice,
 )
+from evaluator import CasoEvaluado, evaluar
 from executor import ejecutar, deshacer
 from scanner import cargar_exclusiones, escanear
 
@@ -93,6 +94,44 @@ def run(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth):
 
     console.print(f"\n[green]Movidos:[/green] {movidos}  [yellow]Omitidos:[/yellow] {omitidos}")
     console.print(f"Log guardado en: [dim]{ruta_log}[/dim]")
+
+
+_opciones_evaluate = [
+    click.argument("directorio", type=click.Path(exists=True, file_okay=False, path_type=Path)),
+    click.option("--exclusions", default=DEFAULT_EXCL, type=click.Path(path_type=Path), show_default=True),
+    click.option("--carpetas-genericas", default=DEFAULT_GENERICAS, type=click.Path(path_type=Path),
+                 show_default=True),
+    click.option("--umbral",    default=0.40, type=float, show_default=True),
+    click.option("--max-depth", default=MAX_DEPTH_DEFAULT, type=int, show_default=True),
+    click.option("--seed", default=None, type=int,
+                 help="Semilla para reproducir la misma selección de archivos holdout."),
+]
+
+def _add_eval_options(func):
+    for opcion in reversed(_opciones_evaluate):
+        func = opcion(func)
+    return func
+
+
+@cli.command()
+@_add_eval_options
+def evaluate(directorio, exclusions, carpetas_genericas, umbral, max_depth, seed):
+    """Mide qué tan seguido clasi regresa un archivo a la carpeta donde ya vivía (holdout)."""
+    exclusiones = cargar_exclusiones(exclusions)
+    genericos   = cargar_carpetas_genericas(carpetas_genericas)
+
+    console.print(f"[dim]Descubriendo carpetas en {directorio} (profundidad ≤ {max_depth})…[/dim]")
+    indice = construir_indice(directorio, exclusiones, max_depth, genericos)
+    console.print(f"[dim]{len(indice)} carpetas indexadas.[/dim]")
+
+    casos = evaluar(indice, umbral, seed)
+    if not casos:
+        console.print(
+            "[yellow]No hay suficientes carpetas con ≥5 archivos para evaluar de forma confiable.[/yellow]"
+        )
+        return
+
+    _mostrar_evaluacion(casos)
 
 
 @cli.command()
@@ -205,6 +244,76 @@ def _mostrar_advertencias_duplicadas(indice: dict[str, EntradaCarpeta]):
             console.print(
                 f"     [dim]→ Considera ejecutar: clasi merge '{otra}' '{entrada.ruta}'[/dim]"
             )
+
+
+def _mostrar_evaluacion(casos: list[CasoEvaluado]):
+    total       = len(casos)
+    correctos   = sum(1 for c in casos if c.estado == "correcto")
+    incorrectos = sum(1 for c in casos if c.estado == "incorrecto")
+    sin_destino = sum(1 for c in casos if c.estado == "sin_destino")
+
+    console.print()
+    console.print(f"[bold]Evaluación por holdout — {total} archivo(s) de prueba[/bold]")
+    console.print(
+        f"[green]Correctos: {correctos} ({correctos/total:.0%})[/green]  "
+        f"[red]Incorrectos: {incorrectos} ({incorrectos/total:.0%})[/red]  "
+        f"[yellow]Sin destino: {sin_destino} ({sin_destino/total:.0%})[/yellow]"
+    )
+
+    color_estado = {"correcto": "green", "incorrecto": "red", "sin_destino": "yellow"}
+
+    tabla = Table(title="Detalle — identificadores con hash, seguro de compartir")
+    tabla.add_column("Carpeta",           style="dim")
+    tabla.add_column("Archivo",           style="cyan")
+    tabla.add_column("Resultado")
+    tabla.add_column("Destino predicho",  style="dim")
+    tabla.add_column("Score", justify="right")
+    tabla.add_column("Método", style="dim")
+
+    for c in casos:
+        tabla.add_row(
+            c.carpeta_id,
+            c.archivo_id,
+            f"[{color_estado[c.estado]}]{c.estado}[/{color_estado[c.estado]}]",
+            c.destino_id or "—",
+            f"{c.score:.2f}",
+            c.metodo,
+        )
+    console.print(tabla)
+
+    nombre_log = f"evaluacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    ruta_log   = LOGS_DIR / nombre_log
+    _guardar_reporte_evaluacion(ruta_log, casos, total, correctos, incorrectos, sin_destino)
+    console.print(f"\nReporte guardado en: [dim]{ruta_log}[/dim]")
+    console.print("[dim]Solo contiene identificadores con hash (no nombres reales) — seguro de adjuntar a un issue.[/dim]")
+
+
+def _guardar_reporte_evaluacion(
+    ruta: Path,
+    casos: list[CasoEvaluado],
+    total: int,
+    correctos: int,
+    incorrectos: int,
+    sin_destino: int,
+):
+    lineas = [
+        "# clasi evaluate report",
+        "",
+        "All identifiers below are short hashes, not real file or folder names — safe to paste into a GitHub issue as-is.",
+        "",
+        f"- Total evaluated: {total}",
+        f"- Correct: {correctos} ({correctos/total:.0%})",
+        f"- Incorrect (routed elsewhere): {incorrectos} ({incorrectos/total:.0%})",
+        f"- No destination: {sin_destino} ({sin_destino/total:.0%})",
+        "",
+        "| Folder | File | Result | Predicted destination | Score | Method |",
+        "|---|---|---|---|---|---|",
+    ]
+    for c in casos:
+        lineas.append(
+            f"| {c.carpeta_id} | {c.archivo_id} | {c.estado} | {c.destino_id or '—'} | {c.score:.2f} | {c.metodo} |"
+        )
+    ruta.write_text("\n".join(lineas) + "\n")
 
 
 if __name__ == "__main__":

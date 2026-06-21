@@ -8,6 +8,7 @@ venv/
 
 # clasi runtime logs (real operation history — never share/commit these)
 logs/*.jsonl
+logs/evaluacion_*.md
 
 # Editors / OS
 .DS_Store

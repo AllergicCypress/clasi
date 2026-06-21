@@ -13,6 +13,3 @@
 1. List the files, folders, and subfolders contained in `~/home/` to understand the structure.
 2. Refine the forbidden paths and exclusions.
 
----
-
-*Spanish checkpoint: `Revisiones_1.1.md`.*

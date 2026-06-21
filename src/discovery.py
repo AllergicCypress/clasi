@@ -97,9 +97,25 @@ def normalizar_nombre(nombre: str) -> str:
 
 
 def tokenizar(texto: str) -> set[str]:
-    """Convierte texto a conjunto de tokens: sin acentos, minúsculas, sin stopwords."""
-    tokens = re.findall(r"[a-zA-Z0-9]+", _quitar_acentos(texto).lower())
-    return {t for t in tokens if t not in STOPWORDS and len(t) >= MIN_LONGITUD_TOKEN}
+    """
+    Convierte texto a conjunto de tokens: sin acentos, minúsculas, sin stopwords.
+
+    Los tokens puramente numéricos se conservan sin importar su longitud:
+    en nombres como "UNIDAD 1" o "ACTIVIDAD 2.6" el número ES la identidad
+    de la carpeta — filtrarlo por MIN_LONGITUD_TOKEN dejaba "UNIDAD 1" y
+    "UNIDAD 6" con el mismo token de nombre ({"unidad"}), indistinguibles
+    para el scorer (detectado con `clasi evaluate` contra datos reales).
+
+    Los decimales ("2.6") se capturan completos, no como "2" y "6" sueltos:
+    de lo contrario "ACTIVIDAD 2.6" y "ACTIVIDAD 6.1" seguían colisionando
+    por compartir el dígito "6" (también detectado con `clasi evaluate`).
+    """
+    texto_norm = _quitar_acentos(texto).lower()
+    tokens = re.findall(r"\d+\.\d+|[a-zA-Z0-9]+", texto_norm)
+    return {
+        t for t in tokens
+        if t not in STOPWORDS and (t[0].isdigit() or len(t) >= MIN_LONGITUD_TOKEN)
+    }
 
 
 def _profundidad_relativa(ruta: Path, *bases: Path) -> int:
