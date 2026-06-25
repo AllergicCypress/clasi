@@ -66,6 +66,51 @@ def ejecutar(resultados: list[Resultado], ruta_log: Path, seco: bool = False) ->
     return entradas_log
 
 
+def merge_carpetas(
+    origen: Path,
+    destino: Path,
+    conflicto: str = "rename_new",
+    seco: bool = True,
+) -> list[dict]:
+    """
+    Mueve recursivamente el contenido de `origen` a `destino`.
+    Preserva la estructura de subdirectorios.
+    Devuelve la lista de operaciones (compatible con `deshacer`).
+    """
+    ops: list[dict] = []
+
+    for item in sorted(origen.rglob("*")):
+        if not item.is_file() or item.is_symlink():
+            continue
+        ruta_rel = item.relative_to(origen)
+        destino_archivo = destino / ruta_rel
+        destino_final = resolver_conflicto(destino_archivo, conflicto)
+
+        if destino_final is None:
+            ops.append({
+                "accion": "skip",
+                "archivo": str(item),
+                "razon": "destino_existe",
+                "regla": "merge",
+            })
+            continue
+
+        op = {
+            "accion": "mover",
+            "archivo": str(item),
+            "destino": str(destino_final),
+            "regla": "merge",
+            "confianza": "alta",
+            "ts": datetime.now().isoformat(),
+        }
+        if not seco:
+            destino_final.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(item), str(destino_final))
+        ops.append(op)
+
+    return ops
+
+
 def deshacer(ruta_log: Path) -> list[dict]:
     if not ruta_log.exists():
         return []

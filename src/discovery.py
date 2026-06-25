@@ -295,7 +295,11 @@ def _mismo_nombre_que_padre(ruta: Path) -> bool:
 _PATRON_ESTRUCTURAL = re.compile(
     r"^(unidad|tarea|practica|examen|parcial|actividad|capturas|"
     r"ejercicio|notas|apuntes|resumen|proyecto|laboratorio|final|"
-    r"clase|lectura|clase)\d*$"
+    r"clase|lectura|"
+    # subcarpetas organizativas de tipo de contenido: se repiten en cada
+    # materia por diseño — son destinos válidos pero nunca duplicados reales
+    r"imagenes|fotos|videos|musica|audio|software|archivos|"
+    r"documentos|recursos|material|extras)\d*$"
 )
 
 
@@ -495,6 +499,16 @@ def puntuar(
       - Si el stem no aporta nada          → penalización: score_nombre × 0.35
       - Contenido de muestra               → señal secundaria (peso 0.3)
 
+    Los tokens NUMÉRICOS del nombre de carpeta (ej. "2.7" en "ACTIVIDAD 2.7")
+    son la identidad estructural que distingue una unidad/actividad de otra
+    — solo cuentan como hit si vienen del STEM, nunca del cuerpo del
+    documento: una tabla de datos o resultados numéricos puede contener
+    "2.7" como simple valor, sin relación alguna con la carpeta "ACTIVIDAD
+    2.7" (detectado con `clasi evaluate`: coincidencias falsas con score
+    0.70–0.96 porque una palabra genérica del stem como "actividad" ya
+    desactivaba la penalización, dejando que el número "colado" por
+    contenido contara como match de nombre completo).
+
     Devuelve un float en [0.0, 1.0].
     """
     if not tokens_contenido and not tokens_stem:
@@ -504,7 +518,9 @@ def puntuar(
 
     # ── Señal primaria: tokens del nombre de carpeta en el archivo ─────────
     if entrada.tokens_nombre:
-        hits_nombre = len(entrada.tokens_nombre & tokens_todos)
+        tokens_numericos = {t for t in entrada.tokens_nombre if t[0].isdigit()}
+        tokens_resto = entrada.tokens_nombre - tokens_numericos
+        hits_nombre = len(tokens_numericos & tokens_stem) + len(tokens_resto & tokens_todos)
         score_nombre = hits_nombre / len(entrada.tokens_nombre)
 
         # Si el stem del archivo no aporta ningún hit, penalizar:

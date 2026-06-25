@@ -77,6 +77,25 @@ Now:    user organizes folders → tool learns from them
 
 20. **Bigger finding, still unresolved: the global index collapses structural folders from different subjects into one.** `clasi evaluate` showed most remaining "incorrect" cases are cross-course collisions: `Numerical Methods/UNIT 1` gets confused with `Differential Equations/UNIT1/1.1` (score 0.91) because the index keeps only **one** canonical entry per normalized name, with no awareness of which subject each one belongs to. This limitation had already been flagged as "out of scope" in an earlier session; there's now quantitative evidence it's the dominant remaining error source. Logged as REV-004 (see `REVIEWS_1.2.md`) — design pending, since it's a bigger architectural change than a tokenization fix.
 
+### 2026-06-22 session — `clasi evaluate ~` exposed an exclusions gap, not a "dot folder" bug
+
+21. **Hint-managed flat destinations (`Software_Instaladores`, `Imágenes_Generales`, `Comprimidos`, `Temporales_Duplicados`) were being recursed into and indexed as thematic hierarchies.** Running `clasi evaluate ~` for the first time dropped accuracy to 8% with 16% wrong moves — far worse than the calibrated `~/Documents` run. Cause: a full Python 3.12.13 source tarball had been extracted inside `~/Downloads/Software_Instaladores/` (`Doc/`, `Include/`, `PC/`, `Modules/`...). Discovery has no concept of "this folder is a flat hint dump, not a hierarchy" — it indexed every subfolder as a candidate destination, producing dozens of `.py/.c/.h/.rst/.vcxproj` files matching unrelated folders at a suspiciously exact score of 0.70 (the structural-pattern shortcut, not a real content/name match). The user's assumption — "hidden (`.`) folders are already excluded so this shouldn't happen" — was correct but irrelevant: `exclusions.yaml` excludes by exact name regardless of dot-prefix, and none of the polluting folders were hidden. The actual gap was architectural: hint `carpeta_especial` destinations are written by `classifier.py` directly as `directorio_base / nombre_carpeta`, completely bypassing the discovery index — so excluding them from discovery costs nothing and removes a real pollution source. Fixed by adding the four hint destination names to `carpetas_exactas` in `exclusions.yaml`. Result on `~`: index 261→135 folders, correct 8%→15%, sin-destino 76%→70%, and the 0.70-score noise storm disappeared entirely. Remaining `incorrecto` cases after the fix are genuine academic-document misroutes, not archive noise — next target for calibration.
+
+22. **`puntuar()` let numeric DATA inside a document's body count as a structural NAME match.** Reviewing the 8 remaining `incorrecto` cases on `~`: `ACTIVIDAD 5.4.docx` (real subject: Métodos Numéricos) scored 0.75 against the unrelated folder `ACTIVIDAD 2.7` — confirmed by direct inspection: the file's body is a results table containing the literal text "2.7" as a data value, and `puntuar()` computed `tokens_todos = tokens_contenido | tokens_stem` *before* checking name-token hits, so that coincidental number counted as a full name-token match. The penalty that should have caught this (`score_nombre × 0.35` when the stem contributes nothing) never triggered, because the stem *did* contribute the generic word "actividad" — enough to waive the penalty while the numeric token rode in for free on body content. This is a second-order regression from finding #18 (keeping numeric tokens as the structural identity of a folder) — correct identity signal, but only trustworthy when it comes from the file's own name, never from data inside it. Fix in `discovery.py::puntuar()`: numeric name-tokens now only count as hits against `tokens_stem`, never against `tokens_contenido`; non-numeric name-tokens are unaffected. Verified on `~`: `incorrecto` 8→5 (15%→9%), with **zero regression** on the calibrated `~/Documents` baseline (`clasi sim ~/Documents` gives byte-identical output before/after — 6 con destino, 13 sin destino). Two previously-"correct" cases also disappeared (`carpeta_2c8154`, `carpeta_3bfba4`, both `metodo=contenido`, scores 0.41 and 0.54) — not a loss: inspection showed they were the *same* bug landing on the right folder by luck (the same kind of inflated, unexplainable score flagged in finding #19), now honestly `sin_destino` instead of an accidentally-correct guess.
+
+    **Remaining 5 `incorrecto` after this fix, all genuine and NOT calibration-fixable:**
+    - 3 cases are confirmed instances of REV-004 (see finding #20): files named bare `1.1.pdf`, `1.2.pdf`… inside `Metodos Numericos/UNIDAD 1` don't token-match their own parent folder at all (`"1.1"` as a whole decimal token vs. `{"unidad", "1"}` — no overlap), but score a perfect 1.0 name-match against an unrelated subject's actual subfolder named exactly `"1.1"` (`Ecuaciones Diferenciales/UNIDAD1/1.1`, scores 0.91–0.96). No threshold or weight change fixes this: the index has no concept of "subject," so a bare numeric subfolder name in any subject is a global attractor for any file sharing that number, anywhere. Needs the index design change already logged as REV-004 — out of scope for a calibration pass.
+    - 1 case (score 0.44) is a genuine borderline miss right at the 0.40 threshold (`ACT_3.2` → wrong unit's `ACTIVIDAD 6.6`). Raising the global umbral to clear it isn't free: the lowest validated `correcto` score in this same run is 0.41 (`contenido` method) — moving the threshold above 0.44 would kill that real match to suppress this one false one. Not adjusted without re-validating against the full `~/Documents` baseline first.
+    - 1 case (score 0.55) is a parent→child move within the *same* unit (`UNIDAD 6` loose file → `UNIDAD 6/ACTIVIDAD RUNGE KUTTA`) — arguably a "too specific" suggestion rather than a wrong one, since both folders share the real topic. Not a misrouting in the harmful sense the metric is meant to catch.
+
+23. **REV-004 isn't an index-collapsing bug — it's a scorer bug.** Tried the line of investigation logged in `REVIEWS_1.2.md` (REV-004): scope the index key for structural-by-position folders by their nearest genuine-topic ancestor, so `Numerical Methods/UNIT 1` and `Differential Equations/UNIT1` get separate index entries instead of one canonical entry shadowing the other. Verified zero regression on the `~/Documents` baseline, but `clasi evaluate ~` showed no real improvement (`incorrecto` count went 5→7 across comparable runs). Direct inspection of the real paths behind the incorrect cases (not the anonymized report) showed why: the colliding folders in the actual failures had never shared a bare normalized name to begin with (`Ecuaciones Diferenciales/UNIDAD1/1.2` vs `Metodos Numericos/UNIDAD 1` — already distinct entries). The real mechanism is in `puntuar()`: a short, purely-numeric folder name like `"1.2"` has its entire `tokens_nombre` satisfied by one matching token in *any* file's stem anywhere in the tree, producing a 0.7–0.97 "nombre" score regardless of subject — `construir_indice()`'s key structure was never the bottleneck. Reverted the change; `discovery.py` is back to the #21/#22 state. Next attempt needs to live in the scorer (e.g. requiring more than a single coincidental token before granting full "nombre" weight, or factoring in tree proximity to the candidate folder), calibrated carefully against `~/Documents` since legitimate matches like `ACTIVIDAD 5.3` rely on the same "small token set, full match" mechanism. Full writeup in `REVIEWS_1.2.md` § REV-004, "Rejected attempt."
+
+24. **Two scorer-side penalties for purely-numeric folder names, both reverted — REV-004 is a genuine information limit, not a missing calibration knob.** Following on #23, tried penalizing a purely-numeric `tokens_nombre` match (`{"1.2"}`) unless corroborated by (a) the folder's sampled content, then (b) the nearest non-structural ancestor's name tokens (`tokens_ancla`) — directly motivated by the user's clarification that assignment cover pages do state the subject name even when the rest of the template (institute, professor) is shared. Variant (a) had no effect: every folder's content sample is dominated by that shared administrative template regardless of subject, so `hits_contenido` is almost never 0. Variant (b) is conceptually correct but broke a real validated baseline case: `Calculo de varias variables 1.2.pdf` (score 0.72, previously correct) has a PDF with completely garbled, non-extractable text (confirmed by printing `extraer_texto()`'s raw output — byte soup, not text) and a stem that doesn't mention the subject either — there is no signal anywhere `clasi` can read to tell this apart from a real cross-subject collision. Both variants reverted; `discovery.py`/`evaluator.py` are back to the #21/#22 baseline (verified identical diff). Conclusion: incremental scorer penalties on this specific signal just trade one error type for the other, because both failure modes draw on the same single starved data point. Don't retry a blanket penalty here without first fixing something orthogonal (OCR fallback for garbled-extraction PDFs) or pivoting to the "surface as low-confidence in the UI" line of investigation. Full writeup in `REVIEWS_1.2.md` § REV-004, "Rejected attempt #2."
+
+### 2026-06-25 session — Phase 2 completion
+
+25. **Content-type subfolder names (`Imágenes`, `Software`, `Música`, `Vídeos`…) appear in every subject folder by design, producing dozens of false duplicate warnings.** Running `clasi sim ~/Downloads` after implementing `clasi merge` surfaced a noisy storm of merge suggestions: `~/Downloads/Cálculo/Imágenes` flagged as a duplicate of `~/Downloads/Circuitos/Imágenes`, `~/Downloads/Métodos Numéricos/Imágenes`, etc. — 34 false warnings for just three shared names. These folders are structurally repetitive (each subject organizes its own images/software/videos/music in a same-named subfolder) exactly like `UNIDAD 1`, `ACTIVIDAD`, `TAREA`. Fix: add these names to `_PATRON_ESTRUCTURAL` in `discovery.py`. Effect: they remain valid index entries and classification targets (files *can* be routed to `Circuitos/Imágenes`), but `_filtrar_duplicadas_reales` ignores them as candidates for duplicate reporting. Verified: the 34 false warnings disappeared; the one genuine duplicate (`~/Downloads/Código` vs `~/Downloads/Programación/Código`) was correctly reported.
+
 ---
 
 ## Prior art — similar tools
@@ -333,7 +352,7 @@ clasificador-archivos/
 │   ├── classifier.py    ← hints first, then TF-IDF discovery
 │   ├── executor.py      ← moves files, JSON Lines log, undo
 │   ├── evaluator.py     ← holdout accuracy evaluation
-│   └── cli.py           ← clasi sim | run | undo  [merge | move-folder in Phase 2]
+│   └── cli.py           ← clasi sim | run | undo | merge | move-folder | catalog | evaluate
 ├── config/
 │   ├── hints.yaml              ← special cases with no thematic semantics (v3)
 │   ├── exclusions.yaml         ← folders and patterns to ignore
@@ -395,7 +414,40 @@ hints:
     accion_especial: carpeta_especial
     nombre_carpeta: Imágenes_Generales
     conflicto: rename_new
+
+  # Compressed files
+  - nombre: comprimidos
+    filtros:
+      - extension: [".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar"]
+    accion_especial: carpeta_especial
+    nombre_carpeta: Comprimidos
+    conflicto: skip
+
+  # Originals whose _merged version already exists — the original is redundant
+  - nombre: original_con_merged
+    filtros:
+      - tiene_merged: true
+    accion_especial: marcar_duplicado
+    conflicto: skip
+
+  # PDFs with garbled/unextractable text — isolate for manual review or OCR
+  - nombre: pdf_texto_corrupto
+    filter_mode: all
+    filtros:
+      - extension: [".pdf"]
+      - texto_corrupto: true
+    accion_especial: carpeta_especial
+    nombre_carpeta: PDF_Texto_Corrupto
+    conflicto: skip
 ```
+
+**Available filter keys:**
+- `extension: [list]` — matches by file extension
+- `nombre_contiene: [list]` — matches if any string appears in the filename
+- `nombre_glob: pattern` — matches filename against a glob pattern
+- `texto_contiene: [list]` — matches if any string appears in the extracted text
+- `texto_corrupto: true` — matches PDFs/docs with >5% control characters in extracted text
+- `tiene_merged: true` — matches `X.ext` when `X_merged.ext` exists in the same directory
 
 **What is NO LONGER in hints.yaml:**
 - Hardcoded destination paths (`~/Downloads/Numerical Methods/`)
@@ -448,6 +500,13 @@ carpetas_exactas:
   - .steam
   - .spicetify
   - .zen
+  # Flat destinations managed by hints.yaml (carpeta_especial): never
+  # thematic hierarchies, and may contain extracted archive/installer
+  # content whose subfolders must not be indexed as classification targets
+  - Software_Instaladores
+  - Imágenes_Generales
+  - Comprimidos
+  - Temporales_Duplicados
 
 # Files that are never touched (by glob pattern)
 patrones_nombre:
@@ -498,7 +557,7 @@ Goal: replicate what we did manually, but runnable at any time.
 - [x] `src/scanner.py` — lists files in the given directory, applies exclusions, skips symlinks
 - [x] `src/classifier.py` — two-stage classification: hints first, then TF-IDF discovery
 - [x] `src/executor.py` — moves files with conflict resolution, JSON Lines log, undo
-- [x] `src/cli.py` — `clasi sim`, `clasi run`, `clasi undo` subcommands
+- [x] `src/cli.py` — `clasi sim`, `clasi run`, `clasi undo`, `clasi merge`, `clasi move-folder`, `clasi catalog`, `clasi evaluate` subcommands
 - [x] `requirements.txt` — click, pyyaml, rich
 - [x] Install dependencies: `sudo pacman -S python-click python-yaml python-rich`
 - [x] Real test on `~/Downloads` — tool works correctly
@@ -521,12 +580,13 @@ Goal: recursive index, detection of duplicate or misplaced folders, and extended
 - [x] `clasi evaluate`: holdout accuracy evaluation against the user's own existing organization (`src/evaluator.py`)
 - [x] Numeric and decimal tokens preserved in `tokenizar()` (previously lost to `MIN_LONGITUD_TOKEN`)
 - [ ] REV-004: the global index collapses same-named structural folders across different subjects (unresolved, see REVIEWS_1.2.md)
-- [ ] `clasi merge`: unify duplicate folders into the canonical one (with log and undo)
-- [ ] `clasi move-folder`: relocate a folder to a more appropriate place
-- [ ] Support for: audio (mutagen), video (ffprobe), source code, ZIP, EPUB
-- [ ] Redundant pair detection `(X.pdf, X_merged.pdf)`
-- [ ] Automatic thematic folder creation when >7 files have no existing destination
-- [ ] `clasi catalog`: markdown catalog of processed files
+- [x] `clasi merge`: unify duplicate folders into the canonical one (with log and undo)
+- [x] `clasi move-folder`: relocate a folder to a more appropriate place
+- [x] Support for: audio (mutagen/ffprobe), video (ffprobe), source code, ZIP, TAR, EPUB, PPTX
+- [x] Redundant pair detection `(X.pdf, X_merged.pdf)` — `tiene_merged` filter in hints.yaml
+- [x] `clasi sim` suggests new thematic folders when ≥7 sin-destino files share a topic token
+- [x] `clasi catalog`: markdown catalog of processed files
+- [x] `clasi evaluate --verbose`: show real paths instead of hashes (for local debugging)
 
 ### Phase 3 — OCR, interactive review, and confidence
 Goal: classify the 25% of files Phase 2 can't resolve on its own.

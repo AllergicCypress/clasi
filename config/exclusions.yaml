@@ -39,6 +39,15 @@ carpetas_exactas:
   - .steam
   - .spicetify
   - .zen
+  # Destinos planos gestionados por hints.yaml (carpeta_especial): nunca son
+  # jerarquías temáticas, y pueden contener archivos/instaladores extraídos
+  # (ej. un .tar.gz de código fuente) cuyas subcarpetas no deben indexarse
+  # como destinos de clasificación.
+  - Software_Instaladores
+  - Imágenes_Generales
+  - Comprimidos
+  - Temporales_Duplicados
+  - PDF_Texto_Corrupto
 
 # Archivos que nunca se tocan (por patrón glob)
 patrones_nombre:

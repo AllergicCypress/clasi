@@ -215,7 +215,7 @@ High
 
 ## Status
 
-Open — found via `clasi evaluate`, design not started
+Open — found via `clasi evaluate`. One line of investigation tried and rejected (2026-06-22), see below.
 
 ### Problem
 
@@ -229,9 +229,31 @@ A genuinely loose file (sitting outside any folder) carries no explicit "which s
 
 ### Possible lines of investigation
 
-- Scope structural-folder index keys by their nearest non-structural/thematic ancestor (e.g. index `"numericalmethods/unidad1"` and `"ecuacionesdiferenciales/unidad1"` separately) instead of by bare normalized name.
+- ~~Scope structural-folder index keys by their nearest non-structural/thematic ancestor...~~ Tried 2026-06-22, see "Rejected attempt" below — doesn't address the dominant failure mode.
 - When scoring a loose file, weight matches by how strongly the file's content also matches the *ancestor* subject folder, not just the structural leaf.
 - Accept this as a known limitation for now and surface it explicitly in `sim`/`evaluate` output (e.g. flag low-confidence matches into generically-named structural folders differently from matches into uniquely-named ones).
+
+### Rejected attempt — anchor-scoped index keys (2026-06-22)
+
+Implemented the first line of investigation above: for any folder classified "temática" by name-pattern or by depth (not by genuine content homogeneity), the index key became `f"{ancla}/{nombre_norm}"` instead of bare `nombre_norm`, where `ancla` is the nearest ancestor folder that *is* a genuine content-verified topic. Goal: stop two subjects' identically-named structural folders (`UNIT 1`/`UNIT 1`) from collapsing into one canonical index entry that hides the other.
+
+Verified zero regression on the calibrated `~/Documents` baseline (byte-identical `clasi sim` output). But `clasi evaluate ~` showed no net improvement — `incorrecto` count moved from 5 to 7 across two runs (different holdout draws, not a clean paired comparison, but directionally not an improvement either).
+
+Direct inspection of the actual incorrect cases (real paths, not the anonymized hashes from the report) showed why: **the dominant failure mode isn't index collapsing at all.** Folders like `Ecuaciones Diferenciales/UNIDAD1/1.2` and `Metodos Numericos/UNIDAD 1` never shared a bare normalized name in the first place (`"12"` vs `"unidad1"` — already distinct index entries before this attempt). The actual mechanism: a short, purely-numeric folder name (e.g. `"1.2"`, `"PAPC1.2"`) has its *entire* `tokens_nombre` set satisfied by a single matching token in *any* file's stem, anywhere in the tree, regardless of subject — producing a coincidental 0.7–0.97 "nombre" score with no connection to the actual topic. Scoping the index key by ancestor does nothing here, because the colliding entries were never merged to begin with; the bug is in `puntuar()`'s scoring, not in `construir_indice()`'s keying.
+
+Reverted (`src/discovery.py` restored to pre-attempt state). The fix needs to happen in the scorer, not the index: something like requiring a minimum number of matching tokens (not just "the whole tokens_nombre set, which may be size 1") before granting a high "nombre" score, or requiring the file to also sit somewhere under the same subject tree (proximity-aware scoring) before a bare numeric match counts at full weight. Not attempted yet — needs its own calibration pass against `~/Documents` to avoid regressing the validated `ACTIVIDAD 5.3`-style exact-name matches, which rely on the same "small token set, full match" mechanism for legitimate cases.
+
+### Rejected attempt #2 — scorer-side penalty for purely-numeric folder names (2026-06-22, same session)
+
+Moved the fix into `puntuar()` as the first attempt's postmortem suggested. Two variants tried, both reverted:
+
+**Variant A — penalize a purely-numeric `tokens_nombre` match (e.g. `{"1.2"}`) unless the folder's own sampled content overlaps the file's tokens.** Zero effect on the real failing cases: direct inspection showed `hits_contenido` was almost never exactly 0, because every folder's content sample is dominated by a shared administrative cover-page template (institute name, professor, student name, "asignatura", "grupo", "semestre") that floods `tokens_contenido` for every subject alike — confirmed by printing the actual token set for the offending `Ecuaciones Diferenciales/.../1.2` entry: it contained `"metodos"`, `"numericos"` even though the folder itself is filed under a different subject. Generic content overlap is not a meaningful corroboration signal for this user's documents.
+
+**Variant B — same penalty, but require overlap specifically with the tokens of the nearest non-structural ancestor folder's name (`tokens_ancla`, e.g. `{"ecuaciones", "diferenciales"}`) instead of the whole content sample.** This follows directly from the user's clarification that assignment cover pages *do* state the subject name even though they share the rest of the template. Implemented `_ancla_tematica()` + a `tokens_ancla` field on `EntradaCarpeta`, populated at index-build time and reused by `evaluator.py`.
+
+This is conceptually the right idea, but broke a real validated case on the `~/Documents` baseline: `Calculo de varias variables 1.2.pdf` (and its sibling `Calculo Vectorial 1.2.pdf`), previously correctly matched (score 0.72) by the literal "1.2" in its stem against `Ecuaciones Diferenciales/.../UNIDAD1/1.2`. Direct inspection of `extraer_texto()`'s output for this PDF showed garbled, non-text byte soup (`'îïðñòòóîîïôîõö÷øùùùúûüýÿÿõÿ0ïï...'`) — the extractor is failing on this file (broken encoding or a scanned page with no real text layer), so the subject name is not recoverable from content, and the stem itself (`"Calculo de varias variables 1.2"`) doesn't mention the subject either. There is no signal anywhere in what `clasi` can read from this file to distinguish it from a genuine cross-subject collision — confirming the REVIEWS_1.2.md "inherent information limit" framing isn't just theoretical caution, it's the literal blocker on a real, previously-validated case.
+
+Reverted both variants entirely (`discovery.py` and `evaluator.py` back to pre-session state, diff identical to the #21/#22 baseline). **Conclusion: incremental scorer penalties keep trading one error type for the other** (cross-subject false positive vs. false negative on a file with no extractable subject signal) without a net win, because the two failure modes draw on the exact same starved evidence (a single short numeric token, nothing else). Don't re-attempt a blanket per-token-pattern penalty without first improving something orthogonal — e.g. OCR fallback for garbled-extraction PDFs (so the subject signal becomes recoverable at all), or accepting the "surface it as low-confidence in the UI" line of investigation instead of trying to silently auto-resolve it.
 
 ---
 

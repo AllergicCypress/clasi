@@ -32,6 +32,9 @@ class CasoEvaluado:
     estado: str                 # "correcto", "incorrecto" o "sin_destino"
     score: float
     metodo: str
+    ruta_archivo: Path | None = None
+    ruta_carpeta: Path | None = None
+    ruta_predicha: Path | None = None
 
 
 def _id_corto(texto: str) -> str:
@@ -58,6 +61,7 @@ def evaluar(
     indice: dict[str, EntradaCarpeta],
     umbral: float = UMBRAL_DEFAULT,
     seed: int | None = None,
+    verbose: bool = False,
 ) -> list[CasoEvaluado]:
     rng = random.Random(seed)
     casos: list[CasoEvaluado] = []
@@ -108,6 +112,9 @@ def evaluar(
                 estado=estado,
                 score=resultado.score,
                 metodo=resultado.metodo,
+                ruta_archivo=archivo if verbose else None,
+                ruta_carpeta=entrada.ruta if verbose else None,
+                ruta_predicha=resultado.entrada.ruta if (verbose and resultado.entrada) else None,
             ))
 
     return casos

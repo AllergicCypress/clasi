@@ -43,3 +43,24 @@ hints:
     accion_especial: carpeta_especial
     nombre_carpeta: Comprimidos
     conflicto: skip
+
+  # Originales cuya versión _merged ya existe: el _merged los contiene,
+  # así que el original es el redundante — va a _Duplicados para revisión.
+  - nombre: original_con_merged
+    filtros:
+      - tiene_merged: true
+    accion_especial: marcar_duplicado
+    conflicto: skip
+
+  # PDFs con texto extraído corrupto (fuente sin tabla de codificación real,
+  # típico de escaneos o impresiones a PDF mal generadas): clasi no puede
+  # leer su contenido, así que tampoco debería adivinar destino con tokens
+  # basura — mejor aislarlos para revisión manual o reprocesarlos con OCR.
+  - nombre: pdf_texto_corrupto
+    filter_mode: all
+    filtros:
+      - extension: [".pdf"]
+      - texto_corrupto: true
+    accion_especial: carpeta_especial
+    nombre_carpeta: PDF_Texto_Corrupto
+    conflicto: skip
