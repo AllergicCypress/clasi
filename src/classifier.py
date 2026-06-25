@@ -8,6 +8,8 @@ Orden de evaluación:
 """
 
 import fnmatch
+import re as _re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +22,25 @@ from discovery import (
     tokenizar,
 )
 from extractor import extraer_texto, texto_corrupto
+
+# Entorno base para eval() del filtro 'python': builtins seguros + utilidades.
+# No incluye __import__, open, exec, compile ni acceso al sistema de archivos
+# más allá del objeto 'archivo' (Path) ya proporcionado.
+_PYTHON_FILTRO_BASE: dict = {
+    "__builtins__": {
+        "len": len, "str": str, "int": int, "float": float, "bool": bool,
+        "abs": abs, "min": min, "max": max, "any": any, "all": all,
+        "sorted": sorted, "list": list, "dict": dict, "set": set,
+        "isinstance": isinstance, "hasattr": hasattr, "getattr": getattr,
+        "print": print,
+    },
+    "re": _re,
+    "Path": Path,
+}
+
+# Expresiones que ya reportaron un error — para no repetir la advertencia
+# en cada archivo del directorio.
+_python_errores_vistos: set[str] = set()
 
 
 # ── Estructura de resultado ───────────────────────────────────────────────────
@@ -67,6 +88,28 @@ def _evaluar_filtro(archivo: Path, texto: str, filtro: dict) -> bool:
     if "tiene_merged" in filtro:
         merged = archivo.parent / f"{archivo.stem}_merged{archivo.suffix}"
         return merged.is_file() and not merged.is_symlink()
+    if "python" in filtro:
+        expr = filtro["python"]
+        entorno = {
+            **_PYTHON_FILTRO_BASE,
+            "archivo": archivo,
+            "texto":   texto,
+            "nombre":  archivo.name,
+            "stem":    archivo.stem,
+            "sufijo":  archivo.suffix.lower(),
+        }
+        try:
+            return bool(eval(expr, entorno))  # noqa: S307
+        except Exception as exc:
+            if expr not in _python_errores_vistos:
+                print(
+                    f"[clasi] filtro python — error en expresión:\n"
+                    f"  expr:  {expr!r}\n"
+                    f"  error: {exc!r}",
+                    file=sys.stderr,
+                )
+                _python_errores_vistos.add(expr)
+            return False
     return False
 
 

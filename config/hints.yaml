@@ -65,3 +65,20 @@ hints:
     accion_especial: carpeta_especial
     nombre_carpeta: PDF_Texto_Corrupto
     conflicto: skip
+
+  # ── filtro python: ejemplo (deshabilitado) ────────────────────────────────
+  # El filtro 'python' evalúa una expresión Python arbitraria.
+  # Variables disponibles: archivo (Path), texto (str), nombre, stem, sufijo,
+  #   re (módulo), Path (clase).
+  # La expresión debe devolver True/False.
+  #
+  # Ejemplo: marcar facturas de noviembre en PDF
+  #
+  # - nombre: facturas_noviembre
+  #   filter_mode: all
+  #   filtros:
+  #     - python: "sufijo == '.pdf' and re.search(r'factura|invoice', texto, re.I) is not None"
+  #     - python: "re.search(r'nov(iembre)?|november', texto, re.I) is not None"
+  #   accion_especial: carpeta_especial
+  #   nombre_carpeta: Facturas/2024-11
+  #   conflicto: rename_new

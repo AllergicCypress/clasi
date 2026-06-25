@@ -595,7 +595,7 @@ Goal: classify the 25% of files Phase 2 can't resolve on its own.
 - [ ] Interactive review: show file, extracted text, candidate destination → user confirms
 - [x] Configurable confidence threshold (only move if score ≥ X) — `--umbral` flag on `sim`/`run`/`evaluate`
 - [x] EXIF support for images (organize by date/camera) — `_exif()` in extractor.py reads ImageDescription, XPTitle, XPComment, Artist, Copyright
-- [ ] `python` filter for advanced custom logic (inspired by `organize`)
+- [x] `python` filter for advanced custom logic (inspired by `organize`) — inline Python expression in hints.yaml; variables: archivo, texto, nombre, stem, sufijo, re, Path
 
 ### Phase 4 — Universality and deployment on any machine
 Goal: anyone can install `clasi` and use it without manual configuration.
