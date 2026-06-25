@@ -591,10 +591,10 @@ Goal: recursive index, detection of duplicate or misplaced folders, and extended
 ### Phase 3 — OCR, interactive review, and confidence
 Goal: classify the 25% of files Phase 2 can't resolve on its own.
 
-- [ ] OCR with Tesseract for scanned PDFs and images
+- [x] OCR with Tesseract for scanned PDFs and images
 - [ ] Interactive review: show file, extracted text, candidate destination → user confirms
-- [ ] Configurable confidence threshold (only move if score ≥ X)
-- [ ] EXIF support for images (organize by date/camera)
+- [x] Configurable confidence threshold (only move if score ≥ X) — `--umbral` flag on `sim`/`run`/`evaluate`
+- [x] EXIF support for images (organize by date/camera) — `_exif()` in extractor.py reads ImageDescription, XPTitle, XPComment, Artist, Copyright
 - [ ] `python` filter for advanced custom logic (inspired by `organize`)
 
 ### Phase 4 — Universality and deployment on any machine

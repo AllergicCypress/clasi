@@ -355,6 +355,208 @@ def catalog(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth
 
 
 @cli.command()
+@_add_options
+@click.option(
+    "--con-inciertos", is_flag=True, default=False,
+    help="También muestra archivos con destino sugerido pero score < 0.5.",
+)
+def review(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth, con_inciertos):
+    """Revisión interactiva: confirma o redirige cada archivo sin destino.
+
+    Muestra un panel por archivo con el texto extraído y la sugerencia del clasificador.
+    Las decisiones se aplican de inmediato y quedan registradas para clasi undo.
+    """
+    import json as _json
+    import re as _re
+    import shutil as _shutil
+
+    from rich.panel import Panel
+
+    if not sys.stdin.isatty():
+        console.print("[red]clasi review requiere una terminal interactiva.[/red]")
+        raise SystemExit(1)
+
+    resultados, indice = _clasificar(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth)
+    directorio_resuelto = directorio.expanduser().resolve()
+
+    candidatos = [r for r in resultados if r.destino is None]
+    if con_inciertos:
+        candidatos += [r for r in resultados if r.destino is not None and r.score < 0.5]
+
+    if not candidatos:
+        console.print("[green]No hay archivos que revisar.[/green]")
+        return
+
+    tipo_desc = "sin destino" + (" + inciertos" if con_inciertos else "")
+    console.print(f"\n[bold]{len(candidatos)} archivo(s) para revisar[/bold] [dim]({tipo_desc})[/dim]")
+    console.print("[dim]  [[s]] confirmar sugerencia · [[c]] elegir carpeta · [[n]] saltar · [[q]] salir[/dim]\n")
+
+    ops: list[dict] = []
+    movidos = 0
+    quit_review = False
+
+    for i, resultado in enumerate(candidatos, 1):
+        if quit_review:
+            break
+
+        tiene_sugerencia = resultado.destino is not None
+
+        texto_raw = _re.sub(r"\s+", " ", resultado.texto_extraido.strip())[:250]
+        texto_panel = texto_raw if texto_raw else "[dim](sin texto extraído)[/dim]"
+
+        if tiene_sugerencia:
+            try:
+                dest_rel = str(resultado.destino.relative_to(directorio_resuelto))
+            except ValueError:
+                dest_rel = str(resultado.destino)
+            sugerencia_str = f"[green]{dest_rel}[/green]  (score: {resultado.score:.2f})"
+        else:
+            sugerencia_str = f"[red]sin destino[/red]  (score máx: {resultado.score:.2f})"
+
+        encabezado = f"review {i}/{len(candidatos)} · {'incierto' if tiene_sugerencia else 'sin destino'}"
+        contenido = (
+            f"[bold cyan]{resultado.archivo.name}[/bold cyan]\n\n"
+            f"[dim]{texto_panel}[/dim]\n\n"
+            f"Sugerencia: {sugerencia_str}"
+        )
+        console.print(Panel(contenido, title=encabezado, border_style="blue"))
+
+        if tiene_sugerencia:
+            console.print("  [cyan][[s]][/cyan] confirmar  [cyan][[c]][/cyan] otra carpeta  [cyan][[n]][/cyan] saltar  [cyan][[q]][/cyan] salir", end="  ")
+        else:
+            console.print("  [cyan][[c]][/cyan] elegir carpeta  [cyan][[n]][/cyan] saltar  [cyan][[q]][/cyan] salir", end="  ")
+
+        while True:
+            tecla = click.getchar().lower()
+
+            if tecla == "q":
+                console.print("\n[dim]Revisión terminada.[/dim]")
+                quit_review = True
+                break
+
+            if tecla == "n":
+                console.print("\n[dim]  → saltado[/dim]")
+                break
+
+            if tecla == "s" and tiene_sugerencia:
+                destino_final = resultado.destino
+                nombre_dest = destino_final / resultado.archivo.name
+                if nombre_dest.exists():
+                    console.print(f"\n[yellow]  Ya existe en destino — saltando.[/yellow]")
+                    break
+                destino_final.mkdir(parents=True, exist_ok=True)
+                _shutil.move(str(resultado.archivo), str(nombre_dest))
+                ops.append({
+                    "accion":    "mover",
+                    "archivo":   str(resultado.archivo),
+                    "destino":   str(nombre_dest),
+                    "regla":     "review",
+                    "confianza": resultado.confianza,
+                    "ts":        datetime.now().isoformat(),
+                })
+                movidos += 1
+                console.print(f"\n[green]  → {dest_rel}[/green]")
+                break
+
+            if tecla == "c":
+                console.print()
+                destino_elegido = _elegir_carpeta(indice, directorio_resuelto)
+                if destino_elegido is not None:
+                    nombre_dest = destino_elegido / resultado.archivo.name
+                    if nombre_dest.exists():
+                        console.print(f"[yellow]  Ya existe en destino — saltando.[/yellow]")
+                        break
+                    destino_elegido.mkdir(parents=True, exist_ok=True)
+                    _shutil.move(str(resultado.archivo), str(nombre_dest))
+                    try:
+                        dest_display = str(destino_elegido.relative_to(directorio_resuelto))
+                    except ValueError:
+                        dest_display = str(destino_elegido)
+                    ops.append({
+                        "accion":    "mover",
+                        "archivo":   str(resultado.archivo),
+                        "destino":   str(nombre_dest),
+                        "regla":     "review-manual",
+                        "confianza": "alta",
+                        "ts":        datetime.now().isoformat(),
+                    })
+                    movidos += 1
+                    console.print(f"[green]  → {dest_display}[/green]")
+                    break
+                # usuario canceló el buscador — volver a mostrar opciones
+                if tiene_sugerencia:
+                    console.print("  [cyan][[s]][/cyan] confirmar  [cyan][[c]][/cyan] otra carpeta  [cyan][[n]][/cyan] saltar  [cyan][[q]][/cyan] salir", end="  ")
+                else:
+                    console.print("  [cyan][[c]][/cyan] elegir carpeta  [cyan][[n]][/cyan] saltar  [cyan][[q]][/cyan] salir", end="  ")
+
+        console.print()
+
+    if ops:
+        nombre_log = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        ruta_log = LOGS_DIR / nombre_log
+        ruta_log.parent.mkdir(parents=True, exist_ok=True)
+        with open(ruta_log, "w") as f_log:
+            for op in ops:
+                f_log.write(_json.dumps(op, ensure_ascii=False) + "\n")
+        console.print(f"[green]Movidos:[/green] {movidos}  Log: [dim]{ruta_log}[/dim]")
+    else:
+        console.print("[yellow]Ningún archivo movido.[/yellow]")
+
+
+def _elegir_carpeta(
+    indice: dict[str, "EntradaCarpeta"],
+    directorio_resuelto: Path,
+) -> Path | None:
+    """Buscador interactivo de carpetas por texto parcial. Devuelve la ruta elegida o None."""
+    console.print("[bold]Buscar carpeta[/bold] (Enter para cancelar):")
+    try:
+        query = input("  > ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if not query:
+        return None
+
+    matches = [
+        entrada
+        for nombre, entrada in sorted(indice.items())
+        if query in nombre.lower()
+    ]
+
+    if not matches:
+        console.print("[yellow]  Sin resultados.[/yellow]")
+        return None
+
+    visible = matches[:10]
+    console.print()
+    for j, entrada in enumerate(visible, 1):
+        try:
+            nombre_rel = str(entrada.ruta.relative_to(directorio_resuelto))
+        except ValueError:
+            nombre_rel = str(entrada.ruta)
+        console.print(f"  [bold]{j}.[/bold] {nombre_rel}")
+
+    if len(matches) > 10:
+        console.print(f"  [dim]… y {len(matches) - 10} más (refina la búsqueda)[/dim]")
+
+    console.print()
+    try:
+        eleccion = input(f"  Número (1–{len(visible)}) o Enter para cancelar: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if not eleccion:
+        return None
+    try:
+        idx = int(eleccion) - 1
+        if 0 <= idx < len(visible):
+            return visible[idx].ruta
+    except ValueError:
+        pass
+
+    console.print("[yellow]  Elección inválida.[/yellow]")
+    return None
+
+
+@cli.command()
 def undo():
     """Revierte la última ejecución."""
     logs = sorted(LOGS_DIR.glob("*.jsonl"))
