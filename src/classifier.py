@@ -19,7 +19,7 @@ from discovery import (
     buscar_destino,
     tokenizar,
 )
-from extractor import extraer_texto
+from extractor import extraer_texto, texto_corrupto
 
 
 # ── Estructura de resultado ───────────────────────────────────────────────────
@@ -46,32 +46,6 @@ def cargar_hints(ruta: Path) -> list[dict]:
 
 # ── Evaluación de hints ───────────────────────────────────────────────────────
 
-UMBRAL_TEXTO_CORRUPTO = 0.05
-
-
-def _ratio_caracteres_control(texto: str) -> float:
-    """
-    Fracción de caracteres de control (fuera de \\n\\r\\t) en `texto`.
-
-    Las letras acentuadas latinas (ñ, î, ø…) son alfabéticas para Python
-    (`isalnum()` las acepta), así que no sirven para detectar texto corrupto.
-    Los caracteres de control SÍ son una señal confiable: nunca aparecen en
-    texto real, pero sí cuando `pdftotext` decodifica una fuente sin tabla
-    de codificación real (PDF generado/escaneado sin capa de texto legible) —
-    confirmado con casos reales (`clasi evaluate`, sesión 2026-06-22).
-    """
-    if not texto:
-        return 0.0
-    malos = sum(
-        1 for c in texto
-        if (ord(c) < 32 and c not in "\n\r\t") or 127 <= ord(c) <= 159
-    )
-    return malos / len(texto)
-
-
-def _texto_corrupto(texto: str) -> bool:
-    return _ratio_caracteres_control(texto) > UMBRAL_TEXTO_CORRUPTO
-
 
 def _evaluar_filtro(archivo: Path, texto: str, filtro: dict) -> bool:
     if "extension" in filtro:
@@ -85,7 +59,11 @@ def _evaluar_filtro(archivo: Path, texto: str, filtro: dict) -> bool:
         texto_lower = texto.lower()
         return any(p.lower() in texto_lower for p in filtro["texto_contiene"])
     if "texto_corrupto" in filtro:
-        return _texto_corrupto(texto)
+        return texto_corrupto(texto)
+    if "sin_texto_util" in filtro:
+        # True cuando el texto extraído (incl. OCR) es demasiado corto para
+        # clasificar — la imagen no tiene texto legible y debe ir a Imágenes_Generales.
+        return len(texto.strip()) < 40
     if "tiene_merged" in filtro:
         merged = archivo.parent / f"{archivo.stem}_merged{archivo.suffix}"
         return merged.is_file() and not merged.is_symlink()

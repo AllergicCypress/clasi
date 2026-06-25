@@ -26,11 +26,12 @@ hints:
     nombre_carpeta: Software_Instaladores
     conflicto: skip
 
-  # Imágenes sin contexto temático
+  # Imágenes sin texto legible — si OCR extrae texto útil, pasan al clasificador
   - nombre: imagenes_sueltas
-    filter_mode: any
+    filter_mode: all
     filtros:
       - extension: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".tiff"]
+      - sin_texto_util: true
     accion_especial: carpeta_especial
     nombre_carpeta: Imágenes_Generales
     conflicto: rename_new
