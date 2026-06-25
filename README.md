@@ -70,7 +70,7 @@ The folder already existed, so `clasi` learned from it.
 
 ## Current status
 
-**Phase 2 of 4**
+**Phase 2 complete — Phase 3 planned**
 
 ### Implemented
 
@@ -80,20 +80,22 @@ The folder already existed, so `clasi` learned from it.
 - Dry-run mode (`sim`)
 - Real execution (`run`)
 - Undo support
-- Folder duplicate detection
+- Folder duplicate detection and warnings
 - Holdout evaluation (`evaluate`)
-
-### In progress
-
 - Folder merging (`merge`)
 - Folder relocation (`move-folder`)
-- Additional file formats
+- Markdown catalog generation (`catalog`)
+- Redundant original detection (`X.pdf` when `X_merged.pdf` already exists)
+- Corrupt/unextractable PDF isolation (`PDF_Texto_Corrupto`)
+- New folder suggestions when ≥7 loose files share a theme
 
-### Planned
+**Supported file types:** PDF, DOCX, XLSX, PPTX, TXT/MD/CSV, EPUB, MP3/FLAC/OGG/WAV/M4A, MP4/MKV/AVI/MOV/WEBM, ZIP/TAR/GZ/XZ, source code (.py .js .java .c .go .rs …)
 
-- OCR
-- Interactive review
-- One-command installation
+### Planned (Phase 3)
+
+- OCR for scanned PDFs and images
+- Interactive review for ambiguous files
+- EXIF support for images
 
 See [`PROJECT.md`](PROJECT.md) for the complete roadmap and architecture.
 
@@ -103,10 +105,10 @@ See [`PROJECT.md`](PROJECT.md) for the complete roadmap and architecture.
 
 `clasi` is designed to be conservative.
 
-- `sim` never modifies the filesystem.
+- `sim`, `evaluate`, and `catalog` never modify the filesystem.
 - Files are moved, never deleted.
-- Every operation is logged.
-- `undo` can revert the latest run.
+- Every operation is logged as JSON Lines.
+- `undo` can revert any run, merge, or move-folder.
 - System folders are excluded by default.
 
 If you're just curious, use:
@@ -124,18 +126,20 @@ Nothing will be modified.
 Requirements:
 
 - Python 3.10+
-- `pdftotext` (from Poppler)
+- `pdftotext` (from Poppler) — PDF text extraction
+- `ffprobe` (from FFmpeg) — video metadata and audio fallback
+- `mutagen` — audio tag reading (optional; falls back to `ffprobe` if not installed)
 
 ### Arch Linux
 
 ```bash
-sudo pacman -S python-click python-yaml python-rich poppler
+sudo pacman -S python-click python-yaml python-rich python-mutagen poppler ffmpeg
 ```
 
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install python3-click python3-yaml python3-rich poppler-utils
+sudo apt install python3-click python3-yaml python3-rich python3-mutagen poppler-utils ffmpeg
 ```
 
 ### Python dependencies
@@ -161,13 +165,7 @@ cd clasi
 clasi sim <directory>
 ```
 
-Shows what would happen without modifying anything.
-
-Example:
-
-```bash
-clasi sim ~/Downloads
-```
+Shows what would happen without modifying anything. Also warns about duplicate folders and suggests new ones when applicable.
 
 ---
 
@@ -179,12 +177,6 @@ clasi run <directory>
 
 Moves files and creates a reversible log.
 
-Example:
-
-```bash
-clasi run ~/Downloads
-```
-
 ---
 
 ### Undo
@@ -193,7 +185,7 @@ clasi run ~/Downloads
 clasi undo
 ```
 
-Reverts the most recent execution log.
+Reverts the most recent `run`, `merge`, or `move-folder` log.
 
 ---
 
@@ -203,15 +195,43 @@ Reverts the most recent execution log.
 clasi evaluate <directory>
 ```
 
-Measures accuracy using the user's existing organization as ground truth.
+Measures accuracy using the user's existing organization as ground truth. Holds out 1–3 files per thematic folder and checks whether `clasi` would route them back correctly.
 
-Example:
+Reports are anonymized automatically (short hashes, no real names). Add `--verbose` to see real paths locally.
 
 ```bash
-clasi evaluate ~/Documents
+clasi evaluate ~/Documents --seed 1
 ```
 
-Reports are anonymized automatically.
+---
+
+### Merge duplicate folders
+
+```bash
+clasi merge <redundant> <canonical>
+```
+
+Moves the contents of a redundant folder into its canonical location, preserving subdirectories. Reversible with `undo`. `sim` suggests the exact command when it detects duplicates.
+
+---
+
+### Relocate a misplaced folder
+
+```bash
+clasi move-folder <folder> <new-parent>
+```
+
+Moves an entire folder to a better location. Reversible with `undo`.
+
+---
+
+### Generate a catalog
+
+```bash
+clasi catalog <directory>
+```
+
+Writes a markdown file to `logs/catalogo_<timestamp>.md` listing every file and its suggested destination.
 
 ---
 
@@ -281,7 +301,7 @@ Architecture, requirements, roadmap, design decisions, lessons learned, and impl
 - [`REVIEWS_1.1.md`](REVIEWS_1.1.md)
 - [`REVIEWS_1.2.md`](REVIEWS_1.2.md)
 
-Known weaknesses, architectural risks, and proposed solutions.
+Known weaknesses, architectural risks, and investigated solutions — including ones tried and rejected with full reasoning.
 
 ---
 
