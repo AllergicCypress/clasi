@@ -352,7 +352,7 @@ clasificador-archivos/
 │   ├── classifier.py    ← hints first, then TF-IDF discovery
 │   ├── executor.py      ← moves files, JSON Lines log, undo
 │   ├── evaluator.py     ← holdout accuracy evaluation
-│   └── cli.py           ← clasi sim | run | undo | merge | move-folder | catalog | evaluate
+│   └── cli.py           ← clasi sim | run | undo | merge | move-folder | catalog | evaluate | review
 ├── config/
 │   ├── hints.yaml              ← special cases with no thematic semantics (v3)
 │   ├── exclusions.yaml         ← folders and patterns to ignore
@@ -447,7 +447,9 @@ hints:
 - `nombre_glob: pattern` — matches filename against a glob pattern
 - `texto_contiene: [list]` — matches if any string appears in the extracted text
 - `texto_corrupto: true` — matches PDFs/docs with >5% control characters in extracted text
+- `sin_texto_util: true` — matches when extracted text (including OCR output) is under 40 chars; used to route non-OCR-readable images to `Imágenes_Generales`
 - `tiene_merged: true` — matches `X.ext` when `X_merged.ext` exists in the same directory
+- `python: "<expr>"` — evaluates an arbitrary Python expression; available variables: `archivo` (Path), `texto` (str), `nombre`, `stem`, `sufijo`, `re` (module), `Path` (class); returns True/False
 
 **What is NO LONGER in hints.yaml:**
 - Hardcoded destination paths (`~/Downloads/Numerical Methods/`)
@@ -592,7 +594,7 @@ Goal: recursive index, detection of duplicate or misplaced folders, and extended
 Goal: classify the 25% of files Phase 2 can't resolve on its own.
 
 - [x] OCR with Tesseract for scanned PDFs and images
-- [ ] Interactive review: show file, extracted text, candidate destination → user confirms
+- [x] Interactive review: show file, extracted text, candidate destination → user confirms (`clasi review`)
 - [x] Configurable confidence threshold (only move if score ≥ X) — `--umbral` flag on `sim`/`run`/`evaluate`
 - [x] EXIF support for images (organize by date/camera) — `_exif()` in extractor.py reads ImageDescription, XPTitle, XPComment, Artist, Copyright
 - [x] `python` filter for advanced custom logic (inspired by `organize`) — inline Python expression in hints.yaml; variables: archivo, texto, nombre, stem, sufijo, re, Path

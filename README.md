@@ -70,7 +70,7 @@ The folder already existed, so `clasi` learned from it.
 
 ## Current status
 
-**Phase 2 complete — Phase 3 planned**
+**Phase 3 complete — Phase 4 planned**
 
 ### Implemented
 
@@ -88,14 +88,32 @@ The folder already existed, so `clasi` learned from it.
 - Redundant original detection (`X.pdf` when `X_merged.pdf` already exists)
 - Corrupt/unextractable PDF isolation (`PDF_Texto_Corrupto`)
 - New folder suggestions when ≥7 loose files share a theme
+- OCR fallback for scanned PDFs (Tesseract, `pdftoppm`, first 2 pages)
+- OCR for images — falls back to EXIF metadata when no readable text found
+- Interactive review (`review`) — per-file panel with extracted text and suggestion; folder search by partial name
+- `python` filter in `hints.yaml` — inline Python expressions for custom routing logic
 
-**Supported file types:** PDF, DOCX, XLSX, PPTX, TXT/MD/CSV, EPUB, MP3/FLAC/OGG/WAV/M4A, MP4/MKV/AVI/MOV/WEBM, ZIP/TAR/GZ/XZ, source code (.py .js .java .c .go .rs …)
+**Supported file types:**
 
-### Planned (Phase 3)
+| Category | Formats | Extraction |
+|---|---|---|
+| Documents | PDF, DOCX, XLSX, PPTX, ODT, ODS | pdftotext / internal XML |
+| Plain text | TXT, MD, CSV, LOG, RTF | direct read |
+| Scanned PDF | any PDF with no text layer | Tesseract OCR (spa+eng) |
+| Images | JPG, PNG, WEBP, TIFF, BMP, SVG | Tesseract OCR → EXIF fallback |
+| Audio | MP3, FLAC, OGG, WAV, M4A, AAC | ID3/Vorbis/MP4 tags (mutagen) |
+| Video | MP4, MKV, AVI, MOV, WEBM | ffprobe metadata |
+| Source code | .py .js .java .c .go .rs .html .sql … | first line + language detection |
+| Archives | ZIP, TAR, GZ, XZ, RAR, 7Z | internal content listing |
+| Ebooks | EPUB | content.opf (title, author, subject) |
 
-- OCR for scanned PDFs and images
-- Interactive review for ambiguous files
-- EXIF support for images
+### Planned (Phase 4)
+
+- `pip install clasi` — clean install on any machine
+- `clasi init` — scans the system, generates `exclusions.yaml` adapted to the detected environment
+- Folder type detection (code projects, system config) to avoid disrupting them
+- Regression tests
+- User documentation
 
 See [`PROJECT.md`](PROJECT.md) for the complete roadmap and architecture.
 
@@ -127,19 +145,28 @@ Requirements:
 
 - Python 3.10+
 - `pdftotext` (from Poppler) — PDF text extraction
+- `pdftoppm` (from Poppler) — converts scanned PDF pages to images for OCR
+- `tesseract` + language data — OCR for scanned PDFs and images
 - `ffprobe` (from FFmpeg) — video metadata and audio fallback
 - `mutagen` — audio tag reading (optional; falls back to `ffprobe` if not installed)
+- `Pillow` — image reading for OCR and EXIF extraction
+- `pytesseract` — Python wrapper for Tesseract
 
 ### Arch Linux
 
 ```bash
-sudo pacman -S python-click python-yaml python-rich python-mutagen poppler ffmpeg
+sudo pacman -S python-click python-yaml python-rich python-mutagen \
+               python-pillow python-pytesseract \
+               poppler ffmpeg tesseract tesseract-data-spa tesseract-data-eng
 ```
 
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install python3-click python3-yaml python3-rich python3-mutagen poppler-utils ffmpeg
+sudo apt install python3-click python3-yaml python3-rich python3-mutagen \
+                 python3-pil python3-pytesseract \
+                 poppler-utils ffmpeg \
+                 tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng
 ```
 
 ### Python dependencies
@@ -225,6 +252,33 @@ Moves an entire folder to a better location. Reversible with `undo`.
 
 ---
 
+### Interactive review
+
+```bash
+clasi review <directory>
+```
+
+Shows a panel for each unclassifiable file with its extracted text (including OCR output) and the classifier's suggestion. You can confirm the suggestion, search for another folder by partial name, or skip.
+
+```
+╭──────── review 1/14 · sin destino ────────────────────────╮
+│ Investigacion de Operaciones.pdf                          │
+│                                                           │
+│ la investigacion de operaciones lineales...               │
+│                                                           │
+│ Sugerencia: sin destino  (score máx: 0.09)               │
+╰───────────────────────────────────────────────────────────╯
+  [c] elegir carpeta  [n] saltar  [q] salir
+```
+
+Keys: `[s]` confirm, `[c]` search folder by name, `[n]` skip, `[q]` quit.
+
+All moves are logged and reversible with `undo`.
+
+Add `--con-inciertos` to also review medium-confidence files (score < 0.5) before they are moved automatically.
+
+---
+
 ### Generate a catalog
 
 ```bash
@@ -232,6 +286,28 @@ clasi catalog <directory>
 ```
 
 Writes a markdown file to `logs/catalogo_<timestamp>.md` listing every file and its suggested destination.
+
+---
+
+### Custom logic with the `python` filter
+
+`hints.yaml` supports a `python` filter that evaluates an arbitrary Python expression per file. This handles cases that don't fit the built-in filters.
+
+Available variables: `archivo` (Path), `texto` (str, including OCR output), `nombre`, `stem`, `sufijo`, `re` (module), `Path` (class).
+
+```yaml
+hints:
+  - nombre: facturas_noviembre
+    filter_mode: all
+    filtros:
+      - python: "sufijo == '.pdf' and re.search(r'factura|invoice', texto, re.I) is not None"
+      - python: "re.search(r'noviembre|november', texto, re.I) is not None"
+    accion_especial: carpeta_especial
+    nombre_carpeta: Facturas/2024-11
+    conflicto: rename_new
+```
+
+If the expression raises an error, `clasi` prints a one-time warning to stderr and treats the filter as non-matching (the file is not routed by that hint).
 
 ---
 
