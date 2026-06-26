@@ -207,7 +207,7 @@ The system currently classifies files but doesn't learn from errors the user det
 
 ---
 
-# REV-004 — The global index collapses same-named structural folders across different subjects
+# REV-004 — Folder semantics are hierarchical, not local
 
 ## Severity
 
@@ -215,23 +215,43 @@ High
 
 ## Status
 
-Open — found via `clasi evaluate`. One line of investigation tried and rejected (2026-06-22), see below.
+Open — found via `clasi evaluate`. Two lines of investigation tried and rejected (2026-06-22). Architectural direction identified (2026-06-25): hierarchy-aware scoring via `tokens_ancestros`. Blocked until OCR was available; OCR implemented in Phase 3 (2026-06-25). Implementation pending.
 
 ### Problem
 
-`construir_indice()` keys its index by normalized folder name alone. When the *same* structural name (`UNIT 1`, `EXAM`, `TAREA 3.1`...) appears under more than one unrelated subject — e.g. `Numerical Methods/UNIT 1` and `Differential Equations/UNIT1/1.1` — only **one** canonical entry survives (chosen by the existing location-priority rule), and the other becomes invisible as a destination. A loose file that actually belongs to the *losing* subject's `UNIT 1` gets scored against the *winning* subject's `UNIT 1` instead, since the index has no notion of "which subject this structural folder belongs to."
+The current discovery model treats every indexed folder as an independent thematic destination. This assumption is false: a folder's semantic meaning is often defined by its ancestors, not by its own name alone.
 
-This was already noted as a known limitation during the REV-001 work (2026-06-20 session) and deliberately left out of scope. `clasi evaluate` (added 2026-06-21) turned it from a theoretical concern into the dominant measured error source: most "incorrect" holdout cases after fixing the tokenization bug (see `PROJECT.md` §17-19) are exactly this — cross-subject collisions, not name-matching defects.
+The original framing focused on index collapsing — same structural names (`UNIT 1`, `EXAM`) from different subjects merging into a single canonical entry. Rejected attempt #1 (below) disproved this as the dominant failure mode. The actual mechanism is different: a short, purely-numeric folder name (e.g. `"1.2"`) has `tokens_nombre = {"1.2"}` — a single token. Any file with `"1.2"` anywhere in its stem produces a 100% name match with score ~0.72, regardless of subject. The contextual information that would disambiguate — `Ecuaciones Diferenciales` vs `Metodos Numericos` — exists in the folder's ancestor path but is never used by the scorer.
+
+The root model is:
+
+```
+folder → keywords
+```
+
+Reality is closer to:
+
+```
+folder + parent + grandparent + existing path → semantic destination
+```
+
+`clasi evaluate` (2026-06-21) made this concrete: most "incorrect" holdout cases are cross-subject collisions where a loosely-named structural leaf folder (like `1.2`) attracts files from the wrong subject via a coincidental single-token stem match.
 
 ### Why it's hard
 
-A genuinely loose file (sitting outside any folder) carries no explicit "which subject tree" signal beyond its own name/content. If that content is generic (a short homework file, a cover page), there may be no reliable way to disambiguate `UNIT 1` in subject A from `UNIT 1` in subject B without more context than the file itself provides — this isn't purely an implementation bug, part of it is an inherent information limit.
+Two failure modes share the same evidence:
+
+- **Variant A** — file with no useful content (blank cover page, generic template): there is no signal to distinguish `MN/.../1.2` from `ED/.../1.2`. `sin_destino` is the correct answer; no classification model can do better without inventing information.
+- **Variant B** — file with relevant content (homework text that mentions the subject): the information exists, but the scorer never reaches it because the numeric name match wins at 0.72 before content scoring matters.
+
+Both variants look identical to the scorer. The fix must handle them differently: variant A → `sin_destino` (no penalty; acceptable), variant B → correct routing (the content should win).
 
 ### Possible lines of investigation
 
-- ~~Scope structural-folder index keys by their nearest non-structural/thematic ancestor...~~ Tried 2026-06-22, see "Rejected attempt" below — doesn't address the dominant failure mode.
-- When scoring a loose file, weight matches by how strongly the file's content also matches the *ancestor* subject folder, not just the structural leaf.
-- Accept this as a known limitation for now and surface it explicitly in `sim`/`evaluate` output (e.g. flag low-confidence matches into generically-named structural folders differently from matches into uniquely-named ones).
+- ~~Scope structural-folder index keys by their nearest non-structural/thematic ancestor...~~ Tried 2026-06-22, see "Rejected attempt #1" below — doesn't address the dominant failure mode.
+- ~~Penalize purely-numeric `tokens_nombre` matches unless corroborated by ancestor name tokens (`tokens_ancla`)...~~ Tried 2026-06-22, see "Rejected attempt #2" below — correct idea, but blocked by garbled PDF extraction. **Unblocked since Phase 3 OCR implementation.**
+- **[Current direction]** Add `tokens_ancestros` to each `EntradaCarpeta` at index-build time (union of `tokens_nombre` from all ancestor folders up to the scanned root). In `puntuar()`, for purely-numeric local names, suppress `score_nombre` and use `score_ancestros` as primary signal. For other folders, add `score_ancestros` as a small supplementary term. See "Proposed direction" below.
+- Accept as a known limit and surface in `sim`/`evaluate` output (flag low-confidence matches into generically-named structural folders differently).
 
 ### Rejected attempt — anchor-scoped index keys (2026-06-22)
 
@@ -254,6 +274,59 @@ Moved the fix into `puntuar()` as the first attempt's postmortem suggested. Two 
 This is conceptually the right idea, but broke a real validated case on the `~/Documents` baseline: `Calculo de varias variables 1.2.pdf` (and its sibling `Calculo Vectorial 1.2.pdf`), previously correctly matched (score 0.72) by the literal "1.2" in its stem against `Ecuaciones Diferenciales/.../UNIDAD1/1.2`. Direct inspection of `extraer_texto()`'s output for this PDF showed garbled, non-text byte soup (`'îïðñòòóîîïôîõö÷øùùùúûüýÿÿõÿ0ïï...'`) — the extractor is failing on this file (broken encoding or a scanned page with no real text layer), so the subject name is not recoverable from content, and the stem itself (`"Calculo de varias variables 1.2"`) doesn't mention the subject either. There is no signal anywhere in what `clasi` can read from this file to distinguish it from a genuine cross-subject collision — confirming the REVIEWS_1.2.md "inherent information limit" framing isn't just theoretical caution, it's the literal blocker on a real, previously-validated case.
 
 Reverted both variants entirely (`discovery.py` and `evaluator.py` back to pre-session state, diff identical to the #21/#22 baseline). **Conclusion: incremental scorer penalties keep trading one error type for the other** (cross-subject false positive vs. false negative on a file with no extractable subject signal) without a net win, because the two failure modes draw on the exact same starved evidence (a single short numeric token, nothing else). Don't re-attempt a blanket per-token-pattern penalty without first improving something orthogonal — e.g. OCR fallback for garbled-extraction PDFs (so the subject signal becomes recoverable at all), or accepting the "surface it as low-confidence in the UI" line of investigation instead of trying to silently auto-resolve it.
+
+### Why the blocker is now removed (2026-06-25)
+
+Variant B was blocked by `Calculo de varias variables 1.2.pdf` — a garbled PDF whose extractor returned byte soup, making subject name recovery impossible from content alone. Phase 3 OCR (Tesseract fallback in `extractor.py`) now recovers readable text from scanned and encoding-broken PDFs. Direct verification: `clasi sim ~/Documents` shows that file now classified correctly via content. The specific evidence cited as "inherent information limit" in the rejected attempt #2 writeup no longer applies.
+
+The same file that broke variant B is now an argument in favor of the proposed direction: OCR gives it text → ancestor context can check whether that text mentions the correct subject → disambiguation becomes possible for variant B cases.
+
+---
+
+### Proposed direction — hierarchy-aware scoring via `tokens_ancestros` (2026-06-25)
+
+**Paradigm change:** the existing folder structure is still the configuration, but the configuration is not the individual folders — it is the hierarchy they form. The classifier should learn *contexts* rather than isolated folder names.
+
+**Implementation sketch (flat index preserved; no tree restructure required):**
+
+1. **`EntradaCarpeta` gains a new field:** `tokens_ancestros: set[str]` — union of `tokenizar(nombre)` for every ancestor folder between the entry and the scanned root. Populated in `construir_indice()` as folders are indexed, walking `ruta.parents` up to `directorio`.
+
+2. **`puntuar()` gains two paths:**
+
+   - **Purely-numeric local name** (`tokens_nombre` has no non-numeric tokens, e.g. `{"1.2"}`, `{"2.2"}`): `score_nombre = 0` (coincidental match suppressed). Ancestor context becomes the primary signal:
+     ```
+     score = score_ancestros * 0.60 + score_contenido * 0.40
+     ```
+     A file about Métodos Numéricos scores well against `MN/.../1.2` (ancestors match) but near-zero against `ED/.../1.2` (ancestors don't match). A file with no content scores 0 for both → `sin_destino`.
+
+   - **Non-numeric local name** (`ACTIVIDAD 5.3`, `UNIDAD 1`, `Ecuaciones Diferenciales`): existing scoring preserved. Ancestor context added as a small supplementary term to avoid disrupting calibrated baselines:
+     ```
+     score = score_nombre * 0.60 + score_ancestros * 0.10 + score_contenido * 0.30
+     ```
+
+**Expected behavior by case:**
+
+| Case | Before | After |
+|---|---|---|
+| Blank `1.1.pdf` vs wrong subject's `1.1` | incorrecto | sin_destino |
+| `1.1.pdf` with MN content vs `MN/.../1.1` | incorrecto (loses to ED) | **correcto** |
+| Blank `1.1.pdf` vs correct `MN/.../1.1` | sometimes correcto (coincidental) | sin_destino |
+| `ACTIVIDAD 5.3.xlsx` → `MN/UNIDAD5/ACTIVIDAD 5.3` | correcto (0.78) | correcto (unchanged) |
+| `zill-d.g.-ecuaciones-diferenciales.pdf` → `ED` | correcto (0.70) | correcto (unchanged) |
+
+The third row represents a genuine information limit (blank file, no signal): it was previously "correct" by coincidence. Converting it to `sin_destino` is more honest. The second row is where the real gain comes from: variant-B incorrectos become correctos.
+
+**Tradeoffs:**
+
+- Purely-numeric folders can no longer be reached without either content or ancestor context. Files with no readable content and a numeric name will always be `sin_destino` for these folders.
+- Changing one ancestor folder's name requires rebuilding the affected descendants' `tokens_ancestros` on the next run — this happens automatically since the index is rebuilt every time.
+- The `0.60 / 0.40` and `0.60 / 0.10 / 0.30` weight splits are initial estimates; calibration against `clasi evaluate` after implementation will determine whether they need adjustment.
+
+**Open questions:**
+
+- Should ancestor inheritance decay with depth? (grandparent contributes less than parent)
+- Should container folders (blocklisted in `carpetas_genericas.yaml`) be skipped during ancestor collection, or kept?
+- Should `tokens_ancestros` include content tokens from ancestor folders, or only name tokens? (name tokens are cleaner and more reliable)
 
 ---
 
