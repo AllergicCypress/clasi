@@ -84,6 +84,7 @@ def evaluar(
             nombre=entrada.nombre,
             tokens_nombre=entrada.tokens_nombre,
             tokens_contenido=contenido_restante,
+            tokens_ancestros=entrada.tokens_ancestros,
             duplicadas=entrada.duplicadas,
         )
         indice_modificado = dict(indice)

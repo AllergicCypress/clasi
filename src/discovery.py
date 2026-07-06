@@ -2,8 +2,10 @@
 Motor de descubrimiento: construye un índice dinámico de carpetas existentes
 y puntúa archivos nuevos contra ese índice.
 
-Principio: la estructura de carpetas del usuario ES la configuración.
-Las reglas no prescriben destinos; este módulo los descubre en tiempo de ejecución.
+Principio: la JERARQUÍA de carpetas del usuario ES la configuración.
+El tema de una carpeta no lo define solo su nombre local sino el camino completo
+desde la raíz: "Metodos Numericos/UNIDAD 1/1.2" es una subcarpeta de MN,
+no un lugar genérico llamado "1.2". Los ancestros aportan contexto semántico.
 """
 
 import fnmatch
@@ -64,10 +66,13 @@ STOPWORDS = {
 class EntradaCarpeta:
     ruta: Path
     nombre: str
-    # Tokens del nombre de carpeta — señal primaria (peso 0.7)
+    # Tokens del nombre de carpeta — señal primaria
     tokens_nombre: set[str] = field(default_factory=set)
-    # Tokens extraídos de una muestra del contenido — señal secundaria (peso 0.3)
+    # Tokens extraídos de una muestra del contenido — señal secundaria
     tokens_contenido: set[str] = field(default_factory=set)
+    # Tokens de los nombres de carpetas ancestras (entre la carpeta y la raíz)
+    # — señal jerárquica que contextualiza carpetas con nombre ambiguo o numérico
+    tokens_ancestros: set[str] = field(default_factory=set)
     # Otras rutas con el mismo nombre normalizado (no canónicas)
     duplicadas: list[Path] = field(default_factory=list)
 
@@ -400,6 +405,32 @@ def _filtrar_duplicadas_reales(
     return reales
 
 
+def _tokens_de_ancestros(ruta: Path, directorio: Path) -> set[str]:
+    """
+    Tokens TEMÁTICOS de las carpetas ancestras entre `ruta` y `directorio`.
+
+    Solo incluye carpetas no estructurales: las estructurales ("UNIDAD5",
+    "TAREA3", "PRACTICA"…) se repiten en todas las materias y no aportan
+    señal que distinga MN/UNIDAD5/5.3 de ED/UNIDAD5/5.3 — ignorarlas
+    concentra el peso en las carpetas temáticas (ej. "Metodos Numericos").
+
+    Ejemplo: para `MN/UNIDAD5/5.3` con raíz `~/Documents`:
+      UNIDAD5 → estructural, se omite
+      Metodos Numericos → tokenizar → {"metodos", "numericos"}  ← única señal útil
+    """
+    tokens: set[str] = set()
+    current = ruta.parent
+    while current != directorio:
+        if current == current.parent:   # seguridad: llegamos a la raíz del sistema
+            break
+        nombre_norm = normalizar_nombre(current.name)
+        solo_alfanum = re.sub(r"[^a-z0-9]", "", nombre_norm)
+        if not _PATRON_ESTRUCTURAL.match(solo_alfanum):
+            tokens |= tokenizar(current.name)
+        current = current.parent
+    return tokens
+
+
 def construir_indice(
     directorio: Path,
     exclusiones: dict | None = None,
@@ -473,6 +504,7 @@ def construir_indice(
             nombre=canonica.name,
             tokens_nombre=tokenizar(canonica.name),
             tokens_contenido=_muestrear_contenido(tokens_cache[canonica]),
+            tokens_ancestros=_tokens_de_ancestros(canonica, directorio),
             duplicadas=duplicadas,
         )
         indice[clave] = entrada
@@ -490,24 +522,27 @@ def puntuar(
     """
     Calcula qué tan bien coincide un archivo con una carpeta del índice.
 
-    Se separan los tokens del nombre del archivo (stem) de los del cuerpo,
-    porque un documento que MENCIONA un tema no debería clasificarse ahí
-    si su propio nombre no tiene relación con esa carpeta.
+    Dos caminos según el tipo de nombre de la carpeta:
 
-    Fórmula:
-      - Si el stem aporta al menos 1 token → señal de nombre completa (peso 0.7)
-      - Si el stem no aporta nada          → penalización: score_nombre × 0.35
-      - Contenido de muestra               → señal secundaria (peso 0.3)
+    A) Nombre puramente numérico (ej. "1.2", "2.7"):
+       El número es la identidad estructural. Solo se activa si el stem del archivo
+       comparte ese mismo número (condición necesaria). Si lo comparte, el score
+       se obtiene de los ancestros jerárquicos —la única señal semántica que
+       distingue MN/UNIDAD1/1.2 de ED/UNIDAD1/1.2— y del contenido de muestra.
+       Peso alto en ancestros porque subfolders numéricos suelen tener pocos
+       archivos (tokens_contenido pequeño → señal de contenido débil).
+       Si el stem NO comparte el número: score = 0.0 (evita rutas espurias).
+         score = score_ancestros × 0.80 + score_contenido × 0.20
+
+    B) Nombre con al menos un token no numérico (caso normal):
+       La señal de nombre es confiable. Se aplica la penalización por match solo
+       de contenido (×0.35) cuando el stem del archivo no aporta ningún hit.
+       Pesos probados y calibrados contra datos reales.
+         score = score_nombre × 0.70 + score_contenido × 0.30
 
     Los tokens NUMÉRICOS del nombre de carpeta (ej. "2.7" en "ACTIVIDAD 2.7")
-    son la identidad estructural que distingue una unidad/actividad de otra
-    — solo cuentan como hit si vienen del STEM, nunca del cuerpo del
-    documento: una tabla de datos o resultados numéricos puede contener
-    "2.7" como simple valor, sin relación alguna con la carpeta "ACTIVIDAD
-    2.7" (detectado con `clasi evaluate`: coincidencias falsas con score
-    0.70–0.96 porque una palabra genérica del stem como "actividad" ya
-    desactivaba la penalización, dejando que el número "colado" por
-    contenido contara como match de nombre completo).
+    solo cuentan como hit si vienen del STEM: evita que coincidencias numéricas
+    en el cuerpo del documento inflen el score (detectado con `clasi evaluate`).
 
     Devuelve un float en [0.0, 1.0].
     """
@@ -516,29 +551,52 @@ def puntuar(
 
     tokens_todos = tokens_contenido | tokens_stem
 
-    # ── Señal primaria: tokens del nombre de carpeta en el archivo ─────────
-    if entrada.tokens_nombre:
-        tokens_numericos = {t for t in entrada.tokens_nombre if t[0].isdigit()}
-        tokens_resto = entrada.tokens_nombre - tokens_numericos
-        hits_nombre = len(tokens_numericos & tokens_stem) + len(tokens_resto & tokens_todos)
-        score_nombre = hits_nombre / len(entrada.tokens_nombre)
-
-        # Si el stem del archivo no aporta ningún hit, penalizar:
-        # el contenido menciona el tema pero el archivo no "pertenece" a él.
-        hits_stem = len(entrada.tokens_nombre & tokens_stem)
-        if hits_stem == 0 and hits_nombre > 0:
-            score_nombre *= 0.35   # penalización por match solo de contenido
-    else:
-        score_nombre = 0.0
-
-    # ── Señal secundaria: tokens de contenido de muestra ──────────────────
+    # ── Señal de contenido de muestra (siempre calculada) ─────────────────
     if entrada.tokens_contenido:
         hits_contenido = len(entrada.tokens_contenido & tokens_todos)
         score_contenido = hits_contenido / len(entrada.tokens_contenido)
     else:
         score_contenido = 0.0
 
-    return score_nombre * 0.7 + score_contenido * 0.3
+    # ── Señal jerárquica: ancestros (siempre calculada) ───────────────────
+    if entrada.tokens_ancestros:
+        hits_ancestros = len(entrada.tokens_ancestros & tokens_todos)
+        score_ancestros = hits_ancestros / len(entrada.tokens_ancestros)
+    else:
+        score_ancestros = 0.0
+
+    # ── Señal primaria: tokens del nombre de la carpeta ───────────────────
+    if not entrada.tokens_nombre:
+        return score_ancestros * 0.10 + score_contenido * 0.30
+
+    tokens_numericos = {t for t in entrada.tokens_nombre if t[0].isdigit()}
+    tokens_resto = entrada.tokens_nombre - tokens_numericos
+
+    if not tokens_resto:
+        # Camino A — nombre puramente numérico (ej. "1.2", "2.7"):
+        # El número en el stem del archivo es condición necesaria:
+        # si el stem no comparte ese número, el archivo no pertenece aquí
+        # y cualquier score via ancestros sería señal espuria.
+        if not (tokens_numericos & tokens_stem):
+            return 0.0
+        # Stem comparte el número: la coincidencia aporta un piso fijo (0.20).
+        # Los ancestros discriminan entre MN/1.2 y ED/1.2 (señal primaria).
+        # Un archivo en blanco sigue siendo sin_destino: sin ancestros ni
+        # contenido que coincidan, el score es 0.20 < umbral (0.40).
+        return score_ancestros * 0.60 + score_contenido * 0.20 + 0.20
+
+    # Camino B — nombre con tokens alfabéticos: señal de nombre confiable.
+    # Pesos originales probados (0.70/0.30): el bono de ancestros está fuera
+    # de scope para este camino — podría introducir regresiones en carpetas de
+    # nivel 1 (sin ancestros) al reducir el peso efectivo del nombre.
+    hits_nombre = len(tokens_numericos & tokens_stem) + len(tokens_resto & tokens_todos)
+    score_nombre = hits_nombre / len(entrada.tokens_nombre)
+
+    hits_stem = len(entrada.tokens_nombre & tokens_stem)
+    if hits_stem == 0 and hits_nombre > 0:
+        score_nombre *= 0.35   # penalización por match solo de contenido
+
+    return score_nombre * 0.70 + score_contenido * 0.30
 
 
 # ── Búsqueda de destino ───────────────────────────────────────────────────────
@@ -571,7 +629,13 @@ def buscar_destino(
         return ResultadoDescubrimiento(None, mejor_score, "ninguno")
 
     # Determinar qué señal fue la dominante (para transparencia en la tabla)
-    hits_stem = len(mejor_entrada.tokens_nombre & tokens_stem)
-    metodo = "nombre" if hits_stem > 0 else "contenido"
+    tokens_numericos_nombre = {t for t in mejor_entrada.tokens_nombre if t[0].isdigit()}
+    es_nombre_puro_numerico = bool(mejor_entrada.tokens_nombre) and not (mejor_entrada.tokens_nombre - tokens_numericos_nombre)
+
+    if es_nombre_puro_numerico:
+        metodo = "contexto"   # ganó vía ancestros jerárquicos, no por el nombre local
+    else:
+        hits_stem = len(mejor_entrada.tokens_nombre & tokens_stem)
+        metodo = "nombre" if hits_stem > 0 else "contenido"
 
     return ResultadoDescubrimiento(mejor_entrada, mejor_score, metodo)

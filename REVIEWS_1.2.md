@@ -215,7 +215,7 @@ High
 
 ## Status
 
-Open — found via `clasi evaluate`. Two lines of investigation tried and rejected (2026-06-22). Architectural direction identified (2026-06-25): hierarchy-aware scoring via `tokens_ancestros`. Blocked until OCR was available; OCR implemented in Phase 3 (2026-06-25). Implementation pending.
+**Resolved (2026-07-05).** Implemented via `tokens_ancestros` in `discovery.py`/`evaluator.py`. Metrics held (correcto 15%, incorrecto 9%); 3 files now routed via `contexto` method. OCR additionally exposed two previously "validated" cases (`Calculo de varias variables 1.2.pdf`, `Calculo Vectorial 1.2.pdf`) as false positives — they scored 0.72 against `Ecuaciones Diferenciales/` only because `pdftotext` returned garbled bytes and the stem's `"1.2"` was the only token. With OCR providing real content ("Vectores y espacio tridimensional"), score dropped to 0.21 → `sin_destino`, which is correct. The user confirmed those files belonged to a Cálculo Vectorial folder that no longer exists.
 
 ### Problem
 
@@ -328,16 +328,36 @@ The third row represents a genuine information limit (blank file, no signal): it
 - Should container folders (blocklisted in `carpetas_genericas.yaml`) be skipped during ancestor collection, or kept?
 - Should `tokens_ancestros` include content tokens from ancestor folders, or only name tokens? (name tokens are cleaner and more reliable)
 
+### Implementation outcome (2026-07-05)
+
+Implemented the proposed direction exactly, with two deviations from the sketch:
+
+1. **Non-numeric path (B):** ancestor bonus omitted. The proposed `0.60/0.10/0.30` split was not implemented — the original `0.70/0.30` weights were kept to avoid disturbing the calibrated baselines for alphabetic-name folders. The value of `tokens_ancestros` is limited to path A; adding it as a supplementary signal in path B carried regression risk without a measured upside.
+
+2. **Purely-numeric path (A):** a floor of `+0.20` is added when `tokens_numericos & tokens_stem` is non-empty (i.e. the stem shares the number), rather than the flat `score_ancestros * 0.60 + score_contenido * 0.40` from the sketch. This preserves the intent (ancestor context as primary discriminator) while ensuring a blank file with the right number in its name still scores 0.40 (floor 0.20 + anything from ancestors/content) — right at the threshold, not silently dropped to zero. If neither ancestors nor content contribute, it scores exactly 0.20 < 0.40 → `sin_destino`.
+
+3. **Ancestor token collection:** structural folders (matching `_PATRON_ESTRUCTURAL`: `unidad\d*`, `actividad\d*`, etc.) are excluded from `_tokens_de_ancestros()`. They repeat across every subject and add noise rather than disambiguation signal. Only thematic folder names (e.g. "Metodos Numericos") are collected.
+
+**`clasi evaluate ~` results (2026-07-05, 53 holdout files):**
+
+```
+Correctos: 8 (15%)   Incorrectos: 5 (9%)   Sin destino: 40 (75%)
+```
+
+Same aggregate metrics as post-#22 baseline. The 3 `contexto`-method correctos were previously counted under another classification path (or borderline); no regressions introduced. All 5 remaining incorrectos route via `nombre`, none via `contexto` — confirming the new path adds no false positives.
+
+The 5 remaining incorrectos are accepted as a known limit: 3 are xlsx files from the same folder with a generic name that collides with a different subject, 1 is a borderline alphabetic match, 1 is a parent→child same-topic edge case. None are addressable by further scorer changes without data to separate them.
+
 ---
 
 # Priority summary
 
-| ID | Severity | Priority |
-|----|----------|----------|
-| REV-001 | Critical | 1 |
-| REV-004 | High | 2 |
-| REV-002 | High | 3 |
-| REV-003 | Medium | 4 |
+| ID | Severity | Status |
+|----|----------|--------|
+| REV-001 | Critical | Open |
+| REV-002 | High | Open |
+| REV-003 | Medium | Open |
+| REV-004 | High | **Resolved 2026-07-05** |
 
-REV-001 should be considered the main architectural risk identified so far, with REV-004 a close second now that it has measured evidence behind it.
+REV-001 remains the main open architectural risk.
 
