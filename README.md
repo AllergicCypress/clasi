@@ -70,7 +70,7 @@ The folder already existed, so `clasi` learned from it.
 
 ## Current status
 
-**Phase 3 complete — Phase 4 planned**
+**All phases complete**
 
 ### Implemented
 
@@ -109,12 +109,7 @@ The folder already existed, so `clasi` learned from it.
 | Archives | ZIP, TAR, GZ, XZ, RAR, 7Z | internal content listing |
 | Ebooks | EPUB | content.opf (title, author, subject) |
 
-### Planned (Phase 4)
-
-- `pip install clasi` — clean install on any machine
-- `clasi init` — scans the system, generates `exclusions.yaml` adapted to the detected environment
-
-See [`PROJECT.md`](PROJECT.md) for the complete roadmap and architecture.
+See [`PROJECT.md`](PROJECT.md) for the complete roadmap, architecture, and future improvement paths.
 
 ---
 
