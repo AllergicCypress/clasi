@@ -141,13 +141,18 @@ cd clasi
 ./install.sh
 ```
 
-The script detects your distribution (Arch Linux, Debian, Ubuntu, Zorin, Linux Mint), installs system tools via the package manager, creates an isolated Python environment, and registers `clasi` as a global command in `~/.local/bin/`.
+`install.sh` handles the full setup in four steps:
 
-If `~/.local/bin` is not in your `PATH`, the script will tell you exactly what to add to your shell config.
+1. Installs system tools via the package manager — `pdftotext` and `pdftoppm` (Poppler), `tesseract` with Spanish and English language data, `ffprobe` (FFmpeg).
+2. Creates an isolated Python environment in `.venv/` and installs all Python dependencies (`click`, `pyyaml`, `rich`, `mutagen`, `Pillow`, `pytesseract`).
+3. Registers `clasi` as a global command in `~/.local/bin/` via a symlink. No need to activate a virtual environment manually.
+4. Verifies that system tools are available and warns about any that are missing.
 
-**System requirements installed automatically:** `pdftotext`, `pdftoppm` (Poppler), `tesseract` + language data (spa + eng), `ffprobe` (FFmpeg).
+**Supported distributions:** Arch Linux, Debian, Ubuntu, Zorin, Linux Mint. On other distributions the script skips step 1 and prints instructions for manual installation; steps 2–4 still run.
 
-**Python requirements installed automatically:** `click`, `pyyaml`, `rich`, `mutagen`, `Pillow`, `pytesseract`.
+If `~/.local/bin` is not in your `PATH`, the script will print the exact line to add to your shell config.
+
+Running `./install.sh` again is safe — all steps are idempotent.
 
 ---
 
