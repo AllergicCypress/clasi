@@ -48,15 +48,17 @@ def cli():
 
 _opciones_comunes = [
     click.argument("directorio", type=click.Path(exists=True, file_okay=False, path_type=Path)),
-    click.option("--hints",      default=DEFAULT_HINTS, type=click.Path(path_type=Path), show_default=True),
-    click.option("--exclusions", default=DEFAULT_EXCL,  type=click.Path(path_type=Path), show_default=True),
+    click.option("--hints",      default=DEFAULT_HINTS, type=click.Path(path_type=Path), show_default=False,
+                 help="Reglas especiales (hints.yaml)."),
+    click.option("--exclusions", default=DEFAULT_EXCL,  type=click.Path(path_type=Path), show_default=False,
+                 help="Rutas y patrones excluidos (exclusions.yaml)."),
     click.option("--carpetas-genericas", default=DEFAULT_GENERICAS, type=click.Path(path_type=Path),
-                 show_default=True,
-                 help="Carpetas contenedoras (no temáticas) que no deben usarse como destino."),
+                 show_default=False,
+                 help="Nombres de carpetas contenedoras a ignorar."),
     click.option("--umbral",     default=0.40, type=float, show_default=True,
-                 help="Score mínimo TF-IDF para aceptar un match (0.0–1.0)."),
+                 help="Score mínimo TF-IDF para aceptar un match."),
     click.option("--max-depth",  default=MAX_DEPTH_DEFAULT, type=int, show_default=True,
-                 help="Profundidad máxima del descubrimiento recursivo de carpetas."),
+                 help="Profundidad del índice de carpetas."),
 ]
 
 def _add_options(func):
@@ -70,7 +72,11 @@ def _add_options(func):
 @cli.command()
 @_add_options
 def sim(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth):
-    """Simula la clasificación sin mover nada."""
+    """Simula la clasificación sin mover nada.
+
+    Muestra qué archivos se moverían y a dónde, detecta carpetas
+    duplicadas y sugiere crear nuevas cuando hay ≥7 sin destino.
+    """
     resultados, indice = _clasificar(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth)
     _mostrar_tabla(resultados, directorio, seco=True)
     _mostrar_advertencias_duplicadas(indice)
@@ -80,7 +86,11 @@ def sim(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth):
 @cli.command()
 @_add_options
 def run(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth):
-    """Clasifica y mueve los archivos."""
+    """Clasifica y mueve los archivos.
+
+    Pide confirmación antes de ejecutar. Crea un log reversible
+    con clasi undo.
+    """
     resultados, indice = _clasificar(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth)
     _mostrar_tabla(resultados, directorio, seco=False)
     _mostrar_advertencias_duplicadas(indice)
@@ -108,11 +118,15 @@ def run(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth):
 
 _opciones_evaluate = [
     click.argument("directorio", type=click.Path(exists=True, file_okay=False, path_type=Path)),
-    click.option("--exclusions", default=DEFAULT_EXCL, type=click.Path(path_type=Path), show_default=True),
+    click.option("--exclusions", default=DEFAULT_EXCL, type=click.Path(path_type=Path), show_default=False,
+                 help="Rutas y patrones excluidos (exclusions.yaml)."),
     click.option("--carpetas-genericas", default=DEFAULT_GENERICAS, type=click.Path(path_type=Path),
-                 show_default=True),
-    click.option("--umbral",    default=0.40, type=float, show_default=True),
-    click.option("--max-depth", default=MAX_DEPTH_DEFAULT, type=int, show_default=True),
+                 show_default=False,
+                 help="Nombres de carpetas contenedoras a ignorar."),
+    click.option("--umbral",    default=0.40, type=float, show_default=True,
+                 help="Score mínimo TF-IDF para aceptar un match."),
+    click.option("--max-depth", default=MAX_DEPTH_DEFAULT, type=int, show_default=True,
+                 help="Profundidad del índice de carpetas."),
     click.option("--seed", default=None, type=int,
                  help="Semilla para reproducir la misma selección de archivos holdout."),
     click.option("--verbose", is_flag=True, default=False,
@@ -128,7 +142,11 @@ def _add_eval_options(func):
 @cli.command()
 @_add_eval_options
 def evaluate(directorio, exclusions, carpetas_genericas, umbral, max_depth, seed, verbose):
-    """Mide qué tan seguido clasi regresa un archivo a la carpeta donde ya vivía (holdout)."""
+    """Mide la precisión del clasificador con holdout.
+
+    Retiene 1-3 archivos por carpeta y verifica si clasi los devuelve
+    al lugar correcto. El reporte usa solo hashes, seguro de compartir.
+    """
     exclusiones = cargar_exclusiones(exclusions)
     genericos   = cargar_carpetas_genericas(carpetas_genericas)
 
@@ -154,10 +172,11 @@ def evaluate(directorio, exclusions, carpetas_genericas, umbral, max_depth, seed
               show_default=True,
               help="Qué hacer si el archivo ya existe en el destino.")
 def merge(redundante, canonica, conflicto):
-    """Unifica una carpeta redundante en la canónica (reversible con undo).
+    """Unifica una carpeta redundante en la canónica.
 
-    Mueve todo el contenido de REDUNDANTE a CANONICA preservando subdirectorios.
-    La carpeta REDUNDANTE queda vacía pero no se elimina.
+    Mueve todo el contenido de REDUNDANTE a CANONICA preservando
+    subdirectorios. REDUNDANTE queda vacía pero no se elimina.
+    Reversible con clasi undo.
     """
     redundante = redundante.expanduser().resolve()
     canonica   = canonica.expanduser().resolve()
@@ -305,7 +324,7 @@ def move_folder(carpeta, nuevo_padre):
 @click.option("--output", default=None, type=click.Path(path_type=Path),
               help="Ruta del archivo markdown de salida (por defecto: logs/catalogo_<ts>.md).")
 def catalog(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth, output):
-    """Genera un catálogo markdown de los archivos y sus destinos sugeridos."""
+    """Catálogo markdown de archivos y destinos sugeridos."""
     resultados, _ = _clasificar(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth)
 
     if output is None:
@@ -369,10 +388,10 @@ def catalog(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth
     help="También muestra archivos con destino sugerido pero score < 0.5.",
 )
 def review(directorio, hints, exclusions, carpetas_genericas, umbral, max_depth, con_inciertos):
-    """Revisión interactiva: confirma o redirige cada archivo sin destino.
+    """Revisión interactiva archivo por archivo.
 
-    Muestra un panel por archivo con el texto extraído y la sugerencia del clasificador.
-    Las decisiones se aplican de inmediato y quedan registradas para clasi undo.
+    Muestra un panel con el texto extraído y la sugerencia del clasificador.
+    Las decisiones quedan registradas para clasi undo.
     """
     import json as _json
     import re as _re
@@ -570,11 +589,10 @@ def _elegir_carpeta(
 @click.option("--forzar", is_flag=True,
               help="Sobreescribir sin pedir confirmación si ya existe.")
 def init(output, forzar):
-    """Genera exclusions.yaml adaptado al sistema detectado.
+    """Genera exclusions.yaml adaptado al sistema.
 
-    Detecta herramientas de desarrollo presentes (~/.cargo, ~/.npm, etc.)
-    y directorios de proyectos de código (~/Projects, ~/Proyectos, etc.)
-    para construir una configuración de exclusiones desde cero.
+    Detecta herramientas de desarrollo (~/.cargo, ~/.npm, etc.) y
+    directorios de proyectos (~/Projects, ~/Proyectos, etc.).
     """
     from .init import detectar, generar_yaml
 
@@ -626,7 +644,7 @@ def init(output, forzar):
 
 @cli.command()
 def undo():
-    """Revierte la última ejecución."""
+    """Revierte la última operación (run, merge o move-folder)."""
     logs = sorted(LOGS_DIR.glob("*.jsonl"))
     if not logs:
         console.print("[red]No hay ningún log para revertir.[/red]")
