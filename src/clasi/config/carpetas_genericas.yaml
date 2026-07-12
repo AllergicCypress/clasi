@@ -1,0 +1,31 @@
+version: 1
+
+# Nombres de carpetas contenedoras: agrupan archivos por contexto
+# administrativo (quién, dónde, cuándo), no por tema. No deben usarse
+# como destino del descubrimiento semántico aunque existan y tengan
+# archivos dentro — ver REV-001 en Revisiones_1.2.md.
+#
+# Comparación insensible a acentos/mayúsculas/espacios/guiones
+# (se normalizan igual que normalizar_nombre() en discovery.py).
+nombres:
+  - Universidad
+  - Escuela
+  - Trabajo
+  - Documentos
+  - Documents
+  - Personal
+  - Importante
+  - Pendientes
+  - Varios
+  - Otros
+  - General
+  - Archivos
+  - Archivo
+  - Backup
+  - Respaldo
+  - Escritorio
+  - Desktop
+  - Misceláneo
+  - Miscelaneos
+  - Carpeta nueva
+  - New folder

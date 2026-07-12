@@ -15,13 +15,13 @@ from pathlib import Path
 
 import yaml
 
-from discovery import (
+from .discovery import (
     EntradaCarpeta,
     ResultadoDescubrimiento,
     buscar_destino,
     tokenizar,
 )
-from extractor import extraer_texto, texto_corrupto
+from .extractor import extraer_texto, texto_corrupto
 
 # Entorno base para eval() del filtro 'python': builtins seguros + utilidades.
 # No incluye __import__, open, exec, compile ni acceso al sistema de archivos

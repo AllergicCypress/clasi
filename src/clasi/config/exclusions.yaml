@@ -1,0 +1,79 @@
+version: 1
+
+# Carpetas que nunca se tocan (por nombre exacto, en cualquier nivel)
+carpetas_exactas:
+  # Sistema y configuración
+  - .git
+  - .config
+  - .local
+  - .ssh
+  - .gnupg
+  - .cache
+  - .mozilla
+  - .thunderbird
+  - .var
+  - snap
+  - node_modules
+  - __pycache__
+  # Entornos de desarrollo
+  - .cargo
+  - .dotnet
+  - .java
+  - .m2
+  - .netbeans
+  - .npm
+  - .vscode
+  - .vscode-shared
+  - .electron-gyp
+  # Herramientas y agentes
+  - .claude
+  - .codex
+  - .agents
+  - .kiro
+  - .pi
+  - .aws
+  - .pki
+  - .windows
+  # Apps de usuario
+  - .minecraft
+  - .steam
+  - .spicetify
+  - .zen
+  # Destinos planos gestionados por hints.yaml (carpeta_especial): nunca son
+  # jerarquías temáticas, y pueden contener archivos/instaladores extraídos
+  # (ej. un .tar.gz de código fuente) cuyas subcarpetas no deben indexarse
+  # como destinos de clasificación.
+  - Software_Instaladores
+  - Imágenes_Generales
+  - Comprimidos
+  - Temporales_Duplicados
+  - PDF_Texto_Corrupto
+
+# Archivos que nunca se tocan (por patrón glob)
+patrones_nombre:
+  - "*.sock"
+  - "*.pid"
+  - "*.lock"
+  - "*.env"
+  - "*.log"
+  - "*.bak"
+  - "desktop.ini"
+  - "thumbs.db"
+  - ".DS_Store"
+  - ".gitignore"
+  - ".bash_history"
+  - ".bash_logout"
+  - ".bash_profile"
+  - ".bashrc"
+  - ".python_history"
+  - ".XCompose"
+  - ".pulse-cookie"
+  - ".claude.json"
+  - "*.desktop"
+
+# Rutas absolutas que nunca se tocan
+rutas_absolutas:
+  - ~/Proyectos/clasificador-archivos
+  - ~/Proyectos
+  - ~/Projects
+  - ~/NetBeansProjects

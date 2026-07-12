@@ -1,5 +1,6 @@
 """Interfaz de línea de comandos: clasi sim | run | undo"""
 
+import importlib.resources as _resources
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -8,25 +9,32 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from classifier import Resultado, cargar_hints, clasificar
-from discovery import (
+from .classifier import Resultado, cargar_hints, clasificar
+from .discovery import (
     MAX_DEPTH_DEFAULT,
     EntradaCarpeta,
     cargar_carpetas_genericas,
     construir_indice,
     tokenizar,
 )
-from evaluator import CasoEvaluado, evaluar
-from executor import ejecutar, deshacer, merge_carpetas
-from scanner import cargar_exclusiones, escanear
+from .evaluator import CasoEvaluado, evaluar
+from .executor import ejecutar, deshacer, merge_carpetas
+from .scanner import cargar_exclusiones, escanear
 
-PROYECTO_DIR    = Path(__file__).parent.parent
-DEFAULT_HINTS   = PROYECTO_DIR / "config" / "hints.yaml"
-DEFAULT_EXCL    = PROYECTO_DIR / "config" / "exclusions.yaml"
-DEFAULT_GENERICAS = PROYECTO_DIR / "config" / "carpetas_genericas.yaml"
-LOGS_DIR        = PROYECTO_DIR / "logs"
+
+def _ruta_config(nombre: str) -> Path:
+    """~/.config/clasi/ primero; bundled en el paquete como fallback."""
+    user = Path.home() / ".config" / "clasi" / nombre
+    if user.exists():
+        return user
+    return Path(str(_resources.files("clasi").joinpath("config").joinpath(nombre)))
+
+
+DEFAULT_HINTS     = _ruta_config("hints.yaml")
+DEFAULT_EXCL      = _ruta_config("exclusions.yaml")
+DEFAULT_GENERICAS = _ruta_config("carpetas_genericas.yaml")
+LOGS_DIR          = Path.home() / ".local" / "share" / "clasi" / "logs"
+_USER_CONFIG_DIR  = Path.home() / ".config" / "clasi"
 
 console = Console()
 
@@ -554,6 +562,66 @@ def _elegir_carpeta(
 
     console.print("[yellow]  Elección inválida.[/yellow]")
     return None
+
+
+@cli.command()
+@click.option("--output", default=None, type=click.Path(path_type=Path),
+              help="Ruta de salida (por defecto: config/exclusions.yaml del proyecto).")
+@click.option("--forzar", is_flag=True,
+              help="Sobreescribir sin pedir confirmación si ya existe.")
+def init(output, forzar):
+    """Genera exclusions.yaml adaptado al sistema detectado.
+
+    Detecta herramientas de desarrollo presentes (~/.cargo, ~/.npm, etc.)
+    y directorios de proyectos de código (~/Projects, ~/Proyectos, etc.)
+    para construir una configuración de exclusiones desde cero.
+    """
+    from .init import detectar, generar_yaml
+
+    ruta_salida = Path(output) if output else _USER_CONFIG_DIR / "exclusions.yaml"
+
+    if ruta_salida.exists() and not forzar:
+        console.print(f"[yellow]Ya existe:[/yellow] {ruta_salida}")
+        console.print("Usa [bold]--forzar[/bold] para sobreescribir.")
+        raise SystemExit(1)
+
+    console.print("[dim]Escaneando el sistema…[/dim]")
+    home = Path.home()
+    resultado = detectar(home)
+
+    herramientas  = resultado["herramientas"]
+    dirs_proyecto = resultado["dirs_proyecto"]
+
+    console.print()
+    if herramientas:
+        console.print("[bold]Herramientas detectadas:[/bold]")
+        for nombre, desc in herramientas:
+            console.print(f"  [green]✓[/green] [dim]{nombre}[/dim]  {desc}")
+    else:
+        console.print("[dim]No se detectaron herramientas de desarrollo en ~.[/dim]")
+
+    console.print()
+    if dirs_proyecto:
+        console.print("[bold]Directorios de proyectos detectados:[/bold]")
+        for ruta in dirs_proyecto:
+            console.print(f"  [green]✓[/green] {ruta}")
+    else:
+        console.print("[dim]No se detectaron directorios de proyectos en ~.[/dim]")
+
+    console.print()
+    console.print(f"Se generará: [bold]{ruta_salida}[/bold]")
+    console.print("¿Continuar? [y/N] ", end="")
+    if input().strip().lower() != "y":
+        console.print("[yellow]Cancelado.[/yellow]")
+        return
+
+    contenido = generar_yaml(resultado, home)
+    ruta_salida.parent.mkdir(parents=True, exist_ok=True)
+    ruta_salida.write_text(contenido)
+    console.print(f"\n[green]Generado:[/green] {ruta_salida}")
+    console.print(
+        "[dim]Edita el archivo para añadir rutas específicas de tu sistema.[/dim]"
+    )
 
 
 @cli.command()

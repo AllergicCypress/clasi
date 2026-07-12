@@ -18,7 +18,7 @@ from typing import Iterator
 
 import yaml
 
-from extractor import extraer_texto
+from .extractor import extraer_texto
 
 # ── Parámetros ────────────────────────────────────────────────────────────────
 
@@ -174,6 +174,30 @@ def _prioridad(ruta: Path) -> tuple[int, int]:
     return (nivel, -num_archivos)
 
 
+# ── Detección de carpetas especiales ─────────────────────────────────────────
+
+# Archivos/carpetas cuya presencia en un directorio indica que es la raíz
+# de un proyecto de código — se excluyen del índice y no se recorren:
+# sus subdirectorios son código fuente, no contenido temático del usuario.
+_MARCADORES_PROYECTO_CODIGO = (
+    ".git",           # repositorio Git (marcador más fiable)
+    "package.json",   # Node.js / npm
+    "Cargo.toml",     # Rust
+    "pyproject.toml", # Python (moderno)
+    "setup.py",       # Python (legacy)
+    "go.mod",         # Go
+    "pom.xml",        # Java / Maven
+    "build.gradle",   # Java / Gradle
+    "CMakeLists.txt", # C/C++ CMake
+    "composer.json",  # PHP
+)
+
+
+def _es_proyecto_codigo(ruta: Path) -> bool:
+    """Devuelve True si la carpeta es raíz de un proyecto de código."""
+    return any((ruta / m).exists() for m in _MARCADORES_PROYECTO_CODIGO)
+
+
 # ── Exclusión de carpetas ─────────────────────────────────────────────────────
 
 def _carpeta_excluida(
@@ -224,6 +248,8 @@ def _recorrer(
         if entrada.name.startswith("."):
             continue
         if _carpeta_excluida(entrada, carpetas_excluidas, rutas_absolutas, patrones):
+            continue
+        if _es_proyecto_codigo(entrada):
             continue
 
         yield entrada

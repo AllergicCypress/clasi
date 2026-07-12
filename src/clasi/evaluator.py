@@ -15,8 +15,8 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
-from discovery import EntradaCarpeta, MAX_ARCHIVOS_MUESTRA, UMBRAL_DEFAULT, buscar_destino, tokenizar
-from extractor import extraer_texto
+from .discovery import EntradaCarpeta, MAX_ARCHIVOS_MUESTRA, UMBRAL_DEFAULT, buscar_destino, tokenizar
+from .extractor import extraer_texto
 
 MAX_HOLDOUT_POR_CARPETA = 3
 FRACCION_MAX_HOLDOUT = 0.20

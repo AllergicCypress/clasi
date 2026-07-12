@@ -651,6 +651,121 @@ Goal: anyone can install `clasi` and use it without manual configuration.
 
 ---
 
+## Future improvement paths
+
+Phases 1–4 are complete. `clasi` is deterministic — TF-IDF + static rules, no learning.
+The following paths describe how it could improve over time, ordered from least to most disruptive.
+
+---
+
+### Path 1 — Review decisions as auto-generated hints
+
+**What it is:** `clasi review` already captures explicit user decisions (confirm / redirect / skip).
+Those decisions are currently discarded after being written to the log. If instead they were
+stored as patterns, each review session would generate new entries in `hints.yaml` automatically.
+
+**How to build it:**
+1. After each `review` session, scan the log for `regla: "review-manual"` entries.
+2. For each one, extract: file extension, tokens from the filename, destination folder.
+3. If the same pattern appears ≥3 times across sessions, propose a new hint in `hints.yaml`.
+4. User approves, rejects, or edits the proposed hint before it takes effect.
+
+**Why this matters:** It's the only path that makes daily use into training.
+After a week of `review` sessions, the tool would handle the user's recurring file types
+without manual intervention — no ML required, fully auditable rules.
+
+**Tradeoff:** The generated hints must be reviewed before activation, or the tool risks
+encoding a one-off decision as a permanent rule. A "pending hints" queue with explicit
+approval is necessary.
+
+---
+
+### Path 2 — Undo as negative feedback
+
+**What it is:** When a user runs `clasi undo`, that signals that the previous run
+produced at least one incorrect move. The specific files that were undone are the signal.
+
+**How to build it:**
+1. When `clasi undo` runs, compare the reverted files against the original classification log.
+2. For each reverted file, record: what score it had, what folder it was sent to, what tokens matched.
+3. Store this in a `feedback.jsonl` log alongside the regular operation logs.
+4. On future runs, `buscar_destino()` checks `feedback.jsonl`: if a file matches a pattern
+   that was previously undone, apply a penalty to that candidate folder's score.
+
+**Why this matters:** It closes the loop on errors without requiring any manual annotation.
+The user just uses undo as they normally would — the tool learns from it implicitly.
+
+**Tradeoff:** Requires careful scoping. A single undo of one file should not permanently
+penalize a folder that was correct for dozens of other files. The penalty must be
+file-pattern-specific, not folder-wide.
+
+---
+
+### Path 3 — Embeddings-based scoring (semantic matching)
+
+**What it is:** Replace TF-IDF with a local embedding model. Instead of checking whether
+tokens overlap between a file and a folder, compute a semantic similarity score.
+This would allow "redes neuronales" to match a folder called "IA", or "heat transfer"
+to match "Transferencia de Calor" — relationships that TF-IDF cannot see.
+
+**How to build it:**
+- Use a small multilingual model (e.g. `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`,
+  ~45 MB) running locally via `sentence-transformers`.
+- At index build time, embed each folder name + content sample → store in a vector cache.
+- At classification time, embed the file's text → cosine similarity against the cached vectors.
+- Keep the TF-IDF scorer as a fallback for when the embedding model is not installed.
+
+**Why this matters:** This is the only path that resolves cross-language and cross-synonym
+ambiguity. The current system requires the file and the folder to share literal tokens.
+An embedding model removes that constraint entirely.
+
+**Tradeoff:** This is the most disruptive change — it adds a ~45 MB dependency, increases
+classification time (GPU optional but recommended), and the model's behavior is less
+auditable than a token count. It also requires a vector cache that must be invalidated
+when folders are added or renamed.
+
+**When to pursue this:** Only after Paths 1 and 2 are implemented and the feedback loop
+produces enough signal to evaluate whether TF-IDF is the real bottleneck. If `evaluate`
+accuracy plateaus above 80%, embeddings may not be worth the complexity.
+
+---
+
+### Path 4 — Filesystem event listener (passive learning)
+
+**What it is:** Watch the filesystem with `inotify` (Linux) for file moves that the user
+performs manually — outside of `clasi`. When the user moves a file themselves, that's
+ground truth: where they put it is where it belongs.
+
+**How to build it:**
+- A background daemon using `watchdog` or direct `inotify` bindings.
+- Detects `IN_MOVED_FROM` + `IN_MOVED_TO` pairs in monitored directories.
+- Logs them to the same `feedback.jsonl` format as Path 2.
+- Over time, this data trains the hint generator from Path 1.
+
+**Why this matters:** It's zero-effort learning — the user doesn't need to do anything
+differently. Just organizing files normally generates training signal.
+
+**Tradeoff:** A background process raises privacy and resource concerns.
+The daemon must be opt-in, explicit about what it records, and must not store file content —
+only filenames, extensions, source directory, and destination directory.
+
+---
+
+### Summary
+
+| Path | Effort | Impact | Fits current architecture |
+|------|--------|--------|--------------------------|
+| 1 — Review → hints | Low | High | Yes — log already exists |
+| 2 — Undo → penalty | Medium | Medium | Yes — log already exists |
+| 3 — Embeddings | High | High | No — scorer rewrite |
+| 4 — inotify daemon | High | Medium | Partial — new component |
+
+**Recommended starting point:** Path 1. The `review` log already contains everything needed.
+The work is: parsing the log, proposing hints, and building an approval UI. No new data
+collection, no model training, no architecture change.
+
+---
+
 ## A note on language
 
 The codebase, CLI output, and config files are in Spanish (the original author's language) — that's intentional and won't change, since it's already tested and working end to end. This document and the review log (`REVIEWS_*.md`) are in English to reach a wider audience for testing help. See `README.md` for a quick bilingual orientation.

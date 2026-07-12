@@ -5,7 +5,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from classifier import Resultado
+from .classifier import Resultado
 
 
 def resolver_conflicto(destino: Path, politica: str) -> Path:

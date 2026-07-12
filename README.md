@@ -92,6 +92,8 @@ The folder already existed, so `clasi` learned from it.
 - OCR for images — falls back to EXIF metadata when no readable text found
 - Interactive review (`review`) — per-file panel with extracted text and suggestion; folder search by partial name
 - `python` filter in `hints.yaml` — inline Python expressions for custom routing logic
+- Automatic code project detection — folders containing `.git`, `Cargo.toml`, `package.json`, etc. are skipped entirely, including all subdirectories
+- Regression test suite — 47 tests covering tokenization, scoring, conflict resolution, and hint evaluation
 
 **Supported file types:**
 
@@ -111,9 +113,6 @@ The folder already existed, so `clasi` learned from it.
 
 - `pip install clasi` — clean install on any machine
 - `clasi init` — scans the system, generates `exclusions.yaml` adapted to the detected environment
-- Folder type detection (code projects, system config) to avoid disrupting them
-- Regression tests
-- User documentation
 
 See [`PROJECT.md`](PROJECT.md) for the complete roadmap and architecture.
 
@@ -311,6 +310,61 @@ If the expression raises an error, `clasi` prints a one-time warning to stderr a
 
 ---
 
+## Configuration
+
+`clasi` works without any configuration — it learns from your existing folder structure.
+
+The `config/` directory contains optional overrides for cases the engine can't infer on its own.
+
+### `config/exclusions.yaml` — what to never touch
+
+Three types of entries:
+
+```yaml
+# Folder names excluded at any depth (exact match)
+carpetas_exactas:
+  - node_modules
+  - __pycache__
+  - .git
+
+# Filename glob patterns — these files are never moved
+patrones_nombre:
+  - "*.env"
+  - "*.log"
+  - "*.bak"
+
+# Absolute paths excluded entirely (supports ~)
+rutas_absolutas:
+  - ~/Projects          # your code projects
+  - ~/Work/Client-X     # a specific path
+```
+
+The defaults already cover common system directories, development environments (`.cargo`, `.npm`, `.vscode`, etc.), and dotfiles. Code project roots are detected automatically from their marker files (`.git`, `Cargo.toml`, `package.json`, etc.) even without being listed here.
+
+### `config/carpetas_genericas.yaml` — organizational containers
+
+Folder names that group files by context (who, where, when) rather than by topic. These are excluded from the discovery index so they don't attract unrelated files.
+
+```yaml
+nombres:
+  - Universidad
+  - Trabajo
+  - Personal
+  - Varios
+```
+
+Matching is accent- and case-insensitive. Add any folder name in your structure that acts as a container rather than a topic.
+
+### `config/hints.yaml` — special-case rules
+
+Rules for files the discovery engine can't classify by topic alone: download duplicates, installers, archives, images without readable text.
+
+Hints are checked before TF-IDF scoring. If a file matches, it's routed directly.
+
+Built-in hints handle the common cases. Add your own using any combination of built-in filters or a `python` expression (see [Custom logic](#custom-logic-with-the-python-filter) above).
+
+---
+
 ## Help wanted
 
 The biggest unknown is not the code.
@@ -378,6 +432,18 @@ Architecture, requirements, roadmap, design decisions, lessons learned, and impl
 - [`REVIEWS_1.2.md`](REVIEWS_1.2.md)
 
 Known weaknesses, architectural risks, and investigated solutions — including ones tried and rejected with full reasoning.
+
+---
+
+## Development
+
+### Running the tests
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+47 tests covering tokenization, scoring, conflict resolution, hint evaluation, and project detection. All tests run without writing to the filesystem except through `tempfile`.
 
 ---
 
