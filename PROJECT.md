@@ -92,17 +92,17 @@ Now:    user organizes folders → tool learns from them
 
 24. **Two scorer-side penalties for purely-numeric folder names, both reverted — REV-004 is a genuine information limit, not a missing calibration knob.** Following on #23, tried penalizing a purely-numeric `tokens_nombre` match (`{"1.2"}`) unless corroborated by (a) the folder's sampled content, then (b) the nearest non-structural ancestor's name tokens (`tokens_ancla`) — directly motivated by the user's clarification that assignment cover pages do state the subject name even when the rest of the template (institute, professor) is shared. Variant (a) had no effect: every folder's content sample is dominated by that shared administrative template regardless of subject, so `hits_contenido` is almost never 0. Variant (b) is conceptually correct but broke a real validated baseline case: `Calculo de varias variables 1.2.pdf` (score 0.72, previously correct) has a PDF with completely garbled, non-extractable text (confirmed by printing `extraer_texto()`'s raw output — byte soup, not text) and a stem that doesn't mention the subject either — there is no signal anywhere `clasi` can read to tell this apart from a real cross-subject collision. Both variants reverted; `discovery.py`/`evaluator.py` are back to the #21/#22 baseline (verified identical diff). Conclusion: incremental scorer penalties on this specific signal just trade one error type for the other, because both failure modes draw on the same single starved data point. Don't retry a blanket penalty here without first fixing something orthogonal (OCR fallback for garbled-extraction PDFs) or pivoting to the "surface as low-confidence in the UI" line of investigation. Full writeup in `REVIEWS_1.2.md` § REV-004, "Rejected attempt #2."
 
-### 2026-07-05 session — REV-004 resolved; Phase 2 + Phase 3 fully complete
-
-25. **OCR exposes false positives that were previously undetectable.** `Calculo de varias variables 1.2.pdf` and `Calculo Vectorial 1.2.pdf` were recorded as "correct" at score 0.72 → `Ecuaciones Diferenciales/`. With OCR recovering the real content ("Vectores y espacio tridimensional"), the score dropped to 0.21 → `sin_destino`. Both files belonged to a Cálculo Vectorial folder that no longer exists — the old score was a false positive driven purely by `"1.2"` in the stem. Lesson: when pdftotext fails, only the stem token survives; any numeric-stem file appears to match any same-numbered structural folder at 0.72. Before OCR, these false positives were invisible and could be validated as correct by mistake.
-
-26. **`tokens_ancestros` is the right fix for purely-numeric folder name ambiguity, but it only moves the needle for Variant B (file with readable content).** Variant A (blank file, no signal) correctly becomes `sin_destino`. The aggregate metrics didn't change (8/15% correct, 5/9% incorrect) because the files that moved from sin_destino → correct via `contexto` were offset by OCR removing the false positives that had been counted as correct. The net effect is: same numbers, but the 8 correct are now genuinely correct.
-
----
-
 ### 2026-06-25 session — Phase 2 completion
 
 25. **Content-type subfolder names (`Imágenes`, `Software`, `Música`, `Vídeos`…) appear in every subject folder by design, producing dozens of false duplicate warnings.** Running `clasi sim ~/Downloads` after implementing `clasi merge` surfaced a noisy storm of merge suggestions: `~/Downloads/Cálculo/Imágenes` flagged as a duplicate of `~/Downloads/Circuitos/Imágenes`, `~/Downloads/Métodos Numéricos/Imágenes`, etc. — 34 false warnings for just three shared names. These folders are structurally repetitive (each subject organizes its own images/software/videos/music in a same-named subfolder) exactly like `UNIDAD 1`, `ACTIVIDAD`, `TAREA`. Fix: add these names to `_PATRON_ESTRUCTURAL` in `discovery.py`. Effect: they remain valid index entries and classification targets (files *can* be routed to `Circuitos/Imágenes`), but `_filtrar_duplicadas_reales` ignores them as candidates for duplicate reporting. Verified: the 34 false warnings disappeared; the one genuine duplicate (`~/Downloads/Código` vs `~/Downloads/Programación/Código`) was correctly reported.
+
+---
+
+### 2026-07-05 session — REV-004 resolved; Phase 2 + Phase 3 fully complete
+
+26. **OCR exposes false positives that were previously undetectable.** `Calculo de varias variables 1.2.pdf` and `Calculo Vectorial 1.2.pdf` were recorded as "correct" at score 0.72 → `Ecuaciones Diferenciales/`. With OCR recovering the real content ("Vectores y espacio tridimensional"), the score dropped to 0.21 → `sin_destino`. Both files belonged to a Cálculo Vectorial folder that no longer exists — the old score was a false positive driven purely by `"1.2"` in the stem. Lesson: when pdftotext fails, only the stem token survives; any numeric-stem file appears to match any same-numbered structural folder at 0.72. Before OCR, these false positives were invisible and could be validated as correct by mistake.
+
+27. **`tokens_ancestros` is the right fix for purely-numeric folder name ambiguity, but it only moves the needle for Variant B (file with readable content).** Variant A (blank file, no signal) correctly becomes `sin_destino`. The aggregate metrics didn't change (8/15% correct, 5/9% incorrect) because the files that moved from sin_destino → correct via `contexto` were offset by OCR removing the false positives that had been counted as correct. The net effect is: same numbers, but the 8 correct are now genuinely correct.
 
 ---
 
@@ -353,22 +353,31 @@ clasificador-archivos/
 ├── PROJECT.md           ← this document
 ├── REVIEWS_1.1.md       ← architecture review log
 ├── REVIEWS_1.2.md
+├── pyproject.toml       ← pip-installable package (setuptools src-layout)
+├── requirements.txt     ← pip fallback for non-pacman systems
 ├── src/
-│   ├── discovery.py     ← dynamic folder index; TF-IDF scoring with penalties
-│   ├── scanner.py       ← walks the directory, applies exclusions, skips symlinks
-│   ├── extractor.py     ← extracts text/metadata depending on file type
-│   ├── classifier.py    ← hints first, then TF-IDF discovery
-│   ├── executor.py      ← moves files, JSON Lines log, undo
-│   ├── evaluator.py     ← holdout accuracy evaluation
-│   └── cli.py           ← clasi sim | run | undo | merge | move-folder | catalog | evaluate | review
-├── config/
-│   ├── hints.yaml              ← special cases with no thematic semantics (v3)
-│   ├── exclusions.yaml         ← folders and patterns to ignore
-│   └── carpetas_genericas.yaml ← container (non-thematic) folder names (REV-001)
-├── logs/
-│   └── .gitkeep
-├── tests/
-└── requirements.txt
+│   └── clasi/           ← installable Python package
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── discovery.py     ← dynamic folder index; TF-IDF scoring with penalties
+│       ├── scanner.py       ← walks the directory, applies exclusions, skips symlinks
+│       ├── extractor.py     ← extracts text/metadata depending on file type
+│       ├── classifier.py    ← hints first, then TF-IDF discovery
+│       ├── executor.py      ← moves files, JSON Lines log, undo
+│       ├── evaluator.py     ← holdout accuracy evaluation
+│       ├── init.py          ← system detection for clasi init
+│       ├── cli.py           ← clasi sim | run | undo | merge | move-folder | catalog | evaluate | review | init
+│       └── config/          ← bundled defaults (user overrides go in ~/.config/clasi/)
+│           ├── hints.yaml              ← special cases with no thematic semantics (v3)
+│           ├── exclusions.yaml         ← folders and patterns to ignore
+│           └── carpetas_genericas.yaml ← container (non-thematic) folder names (REV-001)
+├── config/              ← project-level originals (tracked in git; not loaded at runtime)
+├── logs/                ← local dev logs (gitignored except .gitkeep)
+└── tests/
+    ├── test_discovery.py
+    ├── test_executor.py
+    ├── test_classifier.py
+    └── test_init.py
 ```
 
 ---
@@ -567,7 +576,7 @@ Goal: replicate what we did manually, but runnable at any time.
 - [x] `src/scanner.py` — lists files in the given directory, applies exclusions, skips symlinks
 - [x] `src/classifier.py` — two-stage classification: hints first, then TF-IDF discovery
 - [x] `src/executor.py` — moves files with conflict resolution, JSON Lines log, undo
-- [x] `src/cli.py` — `clasi sim`, `clasi run`, `clasi undo`, `clasi merge`, `clasi move-folder`, `clasi catalog`, `clasi evaluate` subcommands
+- [x] `src/cli.py` — `clasi sim`, `clasi run`, `clasi undo`, `clasi merge`, `clasi move-folder`, `clasi catalog`, `clasi evaluate`, `clasi review`, `clasi init` subcommands
 - [x] `requirements.txt` — click, pyyaml, rich
 - [x] Install dependencies: `sudo pacman -S python-click python-yaml python-rich`
 - [x] Real test on `~/Downloads` — tool works correctly
@@ -607,15 +616,15 @@ Goal: classify the 25% of files Phase 2 can't resolve on its own.
 - [x] EXIF support for images (organize by date/camera) — `_exif()` in extractor.py reads ImageDescription, XPTitle, XPComment, Artist, Copyright
 - [x] `python` filter for advanced custom logic (inspired by `organize`) — inline Python expression in hints.yaml; variables: archivo, texto, nombre, stem, sufijo, re, Path
 
-### Phase 4 — Universality and deployment on any machine
+### Phase 4 — Universality and deployment on any machine ✦ (completed)
 Goal: anyone can install `clasi` and use it without manual configuration.
 
-- [ ] Clean install: `pip install clasi` → works immediately
-- [ ] `clasi init`: scans the machine, generates an `exclusions.yaml` adapted to the detected system
-- [ ] Full recursive support with configurable `max_depth`
-- [ ] Folder type detection (code project, system config) to avoid disorganizing it
-- [ ] Regression tests before running on the home directory
-- [ ] User documentation
+- [x] Clean install: `pip install -e .` (or `pip install clasi` once published) → works immediately; config bundled in `src/clasi/config/`, user config at `~/.config/clasi/`
+- [x] `clasi init`: scans `~` for dev tools and project dirs, generates `~/.config/clasi/exclusions.yaml`
+- [x] Full recursive support with configurable `max_depth` (`--max-depth`, default 4)
+- [x] Code project detection — folders with `.git`, `Cargo.toml`, `package.json`, etc. are skipped entirely including their subtrees
+- [x] Regression test suite — 60 tests covering tokenization, scoring, conflict resolution, hint evaluation, and project detection
+- [x] User documentation — README updated to reflect all phases and commands; future improvement paths documented in PROJECT.md
 
 ---
 
@@ -647,7 +656,7 @@ Goal: anyone can install `clasi` and use it without manual configuration.
 - [x] **Folder categorization (REV-001)** — `UMBRAL_HOMOGENEIDAD = 0.15` (average Jaccard between sampled files, minimum 3 samples) and `MAX_PROFUNDIDAD_HOMOGENEIDAD = 2`. Both provisional: calibrated only against the real test on `~/Documents`; recalibration pending against more user structures.
 - [x] **Holdout evaluation (`clasi evaluate`)** — 1-3 files per thematic folder, never exceeding 20% of its contents; folders need ≥5 files to be evaluated at all. Reports are anonymized with a short (irreversible) hash + extension.
 - [x] **`tokenizar()` keeps numbers** — purely numeric tokens skip the length filter; decimals (`"2.6"`) are captured whole instead of being split at the dot. Fixed after `clasi evaluate` showed it collapsed folders like `UNIT 1`/`UNIT 6` into the same token.
-- [ ] **Init subcommand name** — `clasi init`, `clasi setup`, something else?
+- [x] **Init subcommand name** — `clasi init` (generates `~/.config/clasi/exclusions.yaml` from system scan).
 
 ---
 
