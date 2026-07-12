@@ -353,8 +353,9 @@ clasificador-archivos/
 ├── PROJECT.md           ← this document
 ├── REVIEWS_1.1.md       ← architecture review log
 ├── REVIEWS_1.2.md
-├── pyproject.toml       ← pip-installable package (setuptools src-layout)
+├── pyproject.toml       ← pip-installable package (setuptools src-layout; build-backend: setuptools.build_meta)
 ├── requirements.txt     ← pip fallback for non-pacman systems
+├── install.sh           ← single-command installer (Arch, Debian/Ubuntu/Zorin/Mint)
 ├── src/
 │   └── clasi/           ← installable Python package
 │       ├── __init__.py
@@ -619,7 +620,8 @@ Goal: classify the 25% of files Phase 2 can't resolve on its own.
 ### Phase 4 — Universality and deployment on any machine ✦ (completed)
 Goal: anyone can install `clasi` and use it without manual configuration.
 
-- [x] Clean install: `pip install -e .` (or `pip install clasi` once published) → works immediately; config bundled in `src/clasi/config/`, user config at `~/.config/clasi/`
+- [x] `install.sh` — single-command installer for Arch Linux, Debian, Ubuntu, Zorin, and Linux Mint; installs system tools via package manager, creates an isolated venv, and registers `clasi` as a global command in `~/.local/bin/` via symlink. On unsupported distros, skips the package step, prints specific instructions, and continues with the Python setup. Verifies that `pdftotext`, `tesseract`, and `ffprobe` are available after install. Re-running is safe (all steps are idempotent).
+- [x] `pyproject.toml`: fixed build backend from `setuptools.backends.legacy:build` (non-standard, not present in bundled setuptools) to `setuptools.build_meta` (the correct standard backend). This was discovered when a real installation attempt failed on a fresh venv.
 - [x] `clasi init`: scans `~` for dev tools and project dirs, generates `~/.config/clasi/exclusions.yaml`
 - [x] Full recursive support with configurable `max_depth` (`--max-depth`, default 4)
 - [x] Code project detection — folders with `.git`, `Cargo.toml`, `package.json`, etc. are skipped entirely including their subtrees
