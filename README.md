@@ -135,46 +135,19 @@ Nothing will be modified.
 
 ## Installation
 
-Requirements:
-
-- Python 3.10+
-- `pdftotext` (from Poppler) — PDF text extraction
-- `pdftoppm` (from Poppler) — converts scanned PDF pages to images for OCR
-- `tesseract` + language data — OCR for scanned PDFs and images
-- `ffprobe` (from FFmpeg) — video metadata and audio fallback
-- `mutagen` — audio tag reading (optional; falls back to `ffprobe` if not installed)
-- `Pillow` — image reading for OCR and EXIF extraction
-- `pytesseract` — Python wrapper for Tesseract
-
-### Clone
-
 ```bash
 git clone https://github.com/AllergicCypress/clasi.git
 cd clasi
+./install.sh
 ```
 
-### Arch Linux
+The script detects your distribution (Arch Linux, Debian, Ubuntu, Zorin, Linux Mint), installs system tools via the package manager, creates an isolated Python environment, and registers `clasi` as a global command in `~/.local/bin/`.
 
-```bash
-sudo pacman -S python-click python-yaml python-rich python-mutagen \
-               python-pillow python-pytesseract \
-               poppler ffmpeg tesseract tesseract-data-spa tesseract-data-eng
-```
+If `~/.local/bin` is not in your `PATH`, the script will tell you exactly what to add to your shell config.
 
-### Debian / Ubuntu
+**System requirements installed automatically:** `pdftotext`, `pdftoppm` (Poppler), `tesseract` + language data (spa + eng), `ffprobe` (FFmpeg).
 
-```bash
-sudo apt install python3-click python3-yaml python3-rich python3-mutagen \
-                 python3-pil python3-pytesseract \
-                 poppler-utils ffmpeg \
-                 tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng
-```
-
-### Python dependencies (non-Arch)
-
-```bash
-pip install -r requirements.txt
-```
+**Python requirements installed automatically:** `click`, `pyyaml`, `rich`, `mutagen`, `Pillow`, `pytesseract`.
 
 ---
 
