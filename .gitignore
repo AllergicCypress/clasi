@@ -9,6 +9,10 @@ venv/
 # clasi runtime logs (real operation history — never share/commit these)
 logs/*.jsonl
 logs/evaluacion_*.md
+logs/catalogo_*.md
+
+# Claude Code project instructions (local only)
+CLAUDE.md
 
 # Editors / OS
 .DS_Store
