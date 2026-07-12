@@ -106,6 +106,16 @@ Now:    user organizes folders → tool learns from them
 
 ---
 
+### 2026-07-12 session — recursive file scanner and already-organized filter
+
+28. **`escanear()` only iterated the top level — the scanner and the index were misaligned by design.** `construir_indice()` in `discovery.py` was recursive (walking up to `--max-depth` levels to build the folder index), but `escanear()` in `scanner.py` used a plain `iterdir()` — it only saw files directly in the target directory. Running `clasi sim ~/` on a real home directory returned 10 files (all loose in `~/`) while indexing 132 folders — a tool that knew where things should go but couldn't see most of the things that needed moving. This contradicted the documented design intent ("walk the entire directory tree within the allowed scope"). Fix: `escanear()` now recurses with a separate `SCAN_DEPTH_DEFAULT = 8`, chosen independently from the folder-index depth (default 4): the index only needs to go 4 levels deep because thematic folders live near the root; files can be misplaced at any depth. The function also gained a `_directorio_excluido()` helper that prunes entire excluded directory trees on entry rather than filtering files one by one. Result on `clasi sim ~/Documents`: 19 → 313 files visible; 3 → 46 with a destination.
+
+29. **Files already in the correct location must be silently skipped, not shown as moves.** With a recursive scanner, every file in `~/Documents/Ecuaciones Diferenciales/` gets classified — and the classifier correctly returns `Ecuaciones Diferenciales/` as the destination. Without filtering, these files appear in the table as "needs to move" even though they're already there. Two cases need the same treatment: (a) the file is directly in its destination folder (`destino == padre`); (b) the file is in a subdirectory of its destination (`destino in padre.parents`) — e.g., a file in `ACTIVIDAD 5.3/` whose best match is the parent `Metodos Numericos/` should not be moved to its own grandparent. Fix: `_ya_organizado(r)` in `cli.py` returns `True` for both cases; `_clasificar()` filters these results before building the output list. Files with `destino = None` are unaffected — "sin destino" still appears for files with no match.
+
+30. **`_guardar_reporte_evaluacion` crashed the first time `clasi evaluate` ran on a fresh install** because `~/.local/share/clasi/logs/` didn't exist yet. The logs directory is created lazily on the first `clasi run` (which calls `ejecutar()`), but `clasi evaluate` writes there too without going through `ejecutar()`. Fix: `ruta.parent.mkdir(parents=True, exist_ok=True)` before `write_text()` in `_guardar_reporte_evaluacion`. Same pattern already used in other parts of the codebase for XDG directories.
+
+---
+
 ## Prior art — similar tools
 
 ### `organize` (tfeldmann) — the closest reference
@@ -301,9 +311,10 @@ clasi move-folder "Calculus":
         │ index
         ▼
 [1. SCAN]
-  - Lists loose files in the directory (respecting exclusions)
-  - Configurable max_depth (default: 1 for ~/, null for ~/Downloads)
+  - Walks files recursively up to SCAN_DEPTH_DEFAULT = 8 (separate from the folder-index depth)
+  - Prunes excluded directories on entry (_directorio_excluido) — does not descend into .cargo, .npm, etc.
   - Skips symlinks
+  - After classification: filters out files already in their destination or a subdirectory of it (_ya_organizado)
         │ file list
         ▼
 [2. EXTRACTION]

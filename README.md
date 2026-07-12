@@ -94,6 +94,7 @@ The folder already existed, so `clasi` learned from it.
 - `python` filter in `hints.yaml` — inline Python expressions for custom routing logic
 - Automatic code project detection — folders containing `.git`, `Cargo.toml`, `package.json`, etc. are skipped entirely, including all subdirectories
 - Regression test suite — 60 tests covering tokenization, scoring, conflict resolution, hint evaluation, and project detection
+- Recursive file scanning (depth 8) — `sim` and `run` walk the full directory tree, not just the top level; files already in their correct location are silently skipped
 
 **Supported file types:**
 
@@ -392,11 +393,11 @@ The report is anonymized automatically and can be shared safely.
 
 ### Immediate goal
 
-Automatically organize accumulated files in `~/Downloads`.
+Automatically organize accumulated files in `~/Downloads`. ✓
 
 ### Next goal
 
-Extend the system to all of `~/` with appropriate safety controls.
+Extend the system to all of `~/` with appropriate safety controls. ✓
 
 ### Final goal
 

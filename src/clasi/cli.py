@@ -19,7 +19,7 @@ from .discovery import (
 )
 from .evaluator import CasoEvaluado, evaluar
 from .executor import ejecutar, deshacer, merge_carpetas
-from .scanner import cargar_exclusiones, escanear
+from .scanner import SCAN_DEPTH_DEFAULT, cargar_exclusiones, escanear
 
 
 def _ruta_config(nombre: str) -> Path:
@@ -661,14 +661,26 @@ def _clasificar(
     indice = construir_indice(directorio, exclusiones, max_depth, genericos)
     console.print(f"[dim]{len(indice)} carpetas indexadas.[/dim]")
 
-    archivos   = list(escanear(directorio, exclusiones))
+    archivos   = list(escanear(directorio, exclusiones, SCAN_DEPTH_DEFAULT))
     directorio = directorio.expanduser().resolve()
 
     resultados = [
-        clasificar(a, hints, indice, directorio, umbral)
-        for a in archivos
+        r for r in (
+            clasificar(a, hints, indice, directorio, umbral)
+            for a in archivos
+        )
+        if not _ya_organizado(r)
     ]
     return resultados, indice
+
+
+def _ya_organizado(r: Resultado) -> bool:
+    """True si el archivo ya está en su destino o en una subcarpeta de él."""
+    if r.destino is None:
+        return False
+    destino = r.destino.resolve()
+    padre   = r.archivo.parent.resolve()
+    return destino == padre or destino in padre.parents
 
 
 def _mostrar_tabla(resultados: list[Resultado], directorio: Path, seco: bool):
@@ -879,6 +891,7 @@ def _guardar_reporte_evaluacion(
         lineas.append(
             f"| {c.carpeta_id} | {c.archivo_id} | {c.estado} | {c.destino_id or '—'} | {c.score:.2f} | {c.metodo} |"
         )
+    ruta.parent.mkdir(parents=True, exist_ok=True)
     ruta.write_text("\n".join(lineas) + "\n")
 
 
