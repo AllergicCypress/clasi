@@ -93,7 +93,7 @@ The folder already existed, so `clasi` learned from it.
 - Interactive review (`review`) — per-file panel with extracted text and suggestion; folder search by partial name
 - `python` filter in `hints.yaml` — inline Python expressions for custom routing logic
 - Automatic code project detection — folders containing `.git`, `Cargo.toml`, `package.json`, etc. are skipped entirely, including all subdirectories
-- Regression test suite — 47 tests covering tokenization, scoring, conflict resolution, and hint evaluation
+- Regression test suite — 60 tests covering tokenization, scoring, conflict resolution, hint evaluation, and project detection
 
 **Supported file types:**
 
@@ -146,6 +146,13 @@ Requirements:
 - `Pillow` — image reading for OCR and EXIF extraction
 - `pytesseract` — Python wrapper for Tesseract
 
+### Clone
+
+```bash
+git clone https://github.com/AllergicCypress/clasi.git
+cd clasi
+```
+
 ### Arch Linux
 
 ```bash
@@ -163,17 +170,10 @@ sudo apt install python3-click python3-yaml python3-rich python3-mutagen \
                  tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng
 ```
 
-### Python dependencies
+### Python dependencies (non-Arch)
 
 ```bash
 pip install -r requirements.txt
-```
-
-### Clone
-
-```bash
-git clone https://github.com/AllergicCypress/clasi.git
-cd clasi
 ```
 
 ---
@@ -220,6 +220,8 @@ Measures accuracy using the user's existing organization as ground truth. Holds 
 
 Reports are anonymized automatically (short hashes, no real names). Add `--verbose` to see real paths locally.
 
+The evaluation report is saved to `~/.local/share/clasi/logs/evaluacion_<timestamp>.md` and is safe to attach to a GitHub issue.
+
 ```bash
 clasi evaluate ~/Documents --seed 1
 ```
@@ -254,6 +256,8 @@ clasi review <directory>
 
 Shows a panel for each unclassifiable file with its extracted text (including OCR output) and the classifier's suggestion. You can confirm the suggestion, search for another folder by partial name, or skip.
 
+When a file has no suggested destination:
+
 ```
 ╭──────── review 1/14 · sin destino ────────────────────────╮
 │ Investigacion de Operaciones.pdf                          │
@@ -265,7 +269,9 @@ Shows a panel for each unclassifiable file with its extracted text (including OC
   [c] elegir carpeta  [n] saltar  [q] salir
 ```
 
-Keys: `[s]` confirm, `[c]` search folder by name, `[n]` skip, `[q]` quit.
+When a suggestion is available, `[s]` confirm is also shown.
+
+Keys: `[s]` confirm suggestion (only when one exists), `[c]` search folder by name, `[n]` skip, `[q]` quit.
 
 All moves are logged and reversible with `undo`.
 
@@ -279,7 +285,19 @@ Add `--con-inciertos` to also review medium-confidence files (score < 0.5) befor
 clasi catalog <directory>
 ```
 
-Writes a markdown file to `logs/catalogo_<timestamp>.md` listing every file and its suggested destination.
+Writes a markdown file to `~/.local/share/clasi/logs/catalogo_<timestamp>.md` listing every file and its suggested destination.
+
+---
+
+### Initialize configuration
+
+```bash
+clasi init
+```
+
+Scans `~` for known development tool directories (`.cargo`, `.npm`, `.vscode`, etc.) and project directories (`~/Projects`, `~/Proyectos`, etc.) and generates a personalized `~/.config/clasi/exclusions.yaml`.
+
+Run this once after cloning or installing to avoid scanning your own code projects. Use `--forzar` to overwrite an existing file.
 
 ---
 
@@ -309,9 +327,9 @@ If the expression raises an error, `clasi` prints a one-time warning to stderr a
 
 `clasi` works without any configuration — it learns from your existing folder structure.
 
-The `config/` directory contains optional overrides for cases the engine can't infer on its own.
+Config files are loaded from `~/.config/clasi/` if they exist there, otherwise the bundled defaults are used. To start with a personalized baseline, run `clasi init` once.
 
-### `config/exclusions.yaml` — what to never touch
+### `~/.config/clasi/exclusions.yaml` — what to never touch
 
 Three types of entries:
 
@@ -336,7 +354,7 @@ rutas_absolutas:
 
 The defaults already cover common system directories, development environments (`.cargo`, `.npm`, `.vscode`, etc.), and dotfiles. Code project roots are detected automatically from their marker files (`.git`, `Cargo.toml`, `package.json`, etc.) even without being listed here.
 
-### `config/carpetas_genericas.yaml` — organizational containers
+### `~/.config/clasi/carpetas_genericas.yaml` — organizational containers
 
 Folder names that group files by context (who, where, when) rather than by topic. These are excluded from the discovery index so they don't attract unrelated files.
 
@@ -350,7 +368,7 @@ nombres:
 
 Matching is accent- and case-insensitive. Add any folder name in your structure that acts as a container rather than a topic.
 
-### `config/hints.yaml` — special-case rules
+### `~/.config/clasi/hints.yaml` — special-case rules
 
 Rules for files the discovery engine can't classify by topic alone: download duplicates, installers, archives, images without readable text.
 
@@ -438,7 +456,7 @@ Known weaknesses, architectural risks, and investigated solutions — including 
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-47 tests covering tokenization, scoring, conflict resolution, hint evaluation, and project detection. All tests run without writing to the filesystem except through `tempfile`.
+60 tests covering tokenization, scoring, conflict resolution, hint evaluation, and project detection. All tests run without writing to the filesystem except through `tempfile`.
 
 ---
 
