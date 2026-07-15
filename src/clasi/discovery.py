@@ -481,11 +481,11 @@ def construir_indice(
     directorio = directorio.expanduser().resolve()
     excl = exclusiones or {}
 
-    carpetas_excluidas = set(excl.get("carpetas_exactas", []))
+    carpetas_excluidas = set(excl.get("carpetas_exactas") or [])
     rutas_absolutas = [
-        Path(r).expanduser().resolve() for r in excl.get("rutas_absolutas", [])
+        Path(r).expanduser().resolve() for r in (excl.get("rutas_absolutas") or [])
     ]
-    patrones = excl.get("patrones_nombre", [])
+    patrones = excl.get("patrones_nombre") or []
 
     todas: list[Path] = list(_recorrer(
         directorio, carpetas_excluidas, rutas_absolutas, patrones, max_depth

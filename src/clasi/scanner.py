@@ -11,7 +11,7 @@ SCAN_DEPTH_DEFAULT = 8
 
 def cargar_exclusiones(ruta_config: Path) -> dict:
     with open(ruta_config) as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) or {}
 
 
 def _expandir_rutas(rutas: list[str]) -> list[Path]:
@@ -19,9 +19,9 @@ def _expandir_rutas(rutas: list[str]) -> list[Path]:
 
 
 def escanear(directorio: Path, exclusiones: dict, max_depth: int = SCAN_DEPTH_DEFAULT) -> Iterator[Path]:
-    carpetas_excluidas = set(exclusiones.get("carpetas_exactas", []))
-    patrones_excluidos = exclusiones.get("patrones_nombre", [])
-    rutas_absolutas = _expandir_rutas(exclusiones.get("rutas_absolutas", []))
+    carpetas_excluidas = set(exclusiones.get("carpetas_exactas") or [])
+    patrones_excluidos = exclusiones.get("patrones_nombre") or []
+    rutas_absolutas = _expandir_rutas(exclusiones.get("rutas_absolutas") or [])
 
     directorio = directorio.expanduser().resolve()
 
